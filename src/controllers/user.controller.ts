@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { PrismaClient } from '../../generated/prisma/index.js';
 import bcrypt from 'bcrypt';
 import { createUserFolder } from '../utils/folderUtils.js';
+import { generateToken } from '../utils/jwt.js';
 
 const prisma = new PrismaClient();
 const SALT_ROUNDS = 12;
@@ -24,7 +25,6 @@ export const createUser = async (req: Request, res: Response) => {
       });
     }
 
-    // Check for existing user by email, empCode, or username
     const existingUser = await prisma.user.findFirst({
       where: {
         OR: [
@@ -44,9 +44,7 @@ export const createUser = async (req: Request, res: Response) => {
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-    // Use transaction to ensure data consistency
     const user = await prisma.$transaction(async (tx) => {
-      // Create user first
       const newUser = await tx.user.create({
         data: {
           empCode: empCode.trim(),
@@ -60,7 +58,6 @@ export const createUser = async (req: Request, res: Response) => {
         }
       });
 
-      // Create userLocation record
       await tx.userLocation.create({
         data: {
           empCode: empCode.trim(),
@@ -69,7 +66,6 @@ export const createUser = async (req: Request, res: Response) => {
         }
       });
 
-      // Return user with userLocation included
       return await tx.user.findUnique({
         where: { empCode: empCode.trim() },
         include: {
@@ -80,13 +76,26 @@ export const createUser = async (req: Request, res: Response) => {
 
     createUserFolder(user!.username);
 
+    // Generate JWT token
+    const token = generateToken({
+      userKey: user!.userKey,
+      empCode: user!.empCode,
+      username: user!.username,
+      email: user!.email
+    });
+
     const { password: _, ...userWithoutPassword } = user!;
 
     res.status(201).json({
       success: true, 
       username: user!.username,
       empCode: user!.empCode,
-      user: userWithoutPassword,
+      user: {
+        ...userWithoutPassword,
+        userKey: user!.userKey,
+        id: user!.empCode // For backward compatibility
+      },
+      token,
       message: "User created successfully"
     });
 
@@ -124,7 +133,6 @@ export const loginUser = async (req: Request, res: Response) => {
       });
     }
 
-    // Check if user is active
     if (!user.isActive) {
       return res.status(401).json({ 
         success: false, 
@@ -143,6 +151,14 @@ export const loginUser = async (req: Request, res: Response) => {
 
     createUserFolder(user.username);
 
+    // Generate JWT token
+    const token = generateToken({
+      userKey: user.userKey,
+      empCode: user.empCode,
+      username: user.username,
+      email: user.email
+    });
+
     const { password: _, ...userWithoutPassword } = user;
 
     res.status(200).json({ 
@@ -150,7 +166,12 @@ export const loginUser = async (req: Request, res: Response) => {
       userId: user.userKey,
       empCode: user.empCode,
       username: user.username,
-      user: userWithoutPassword,
+      user: {
+        ...userWithoutPassword,
+        userKey: user.userKey,
+        id: user.empCode // For backward compatibility
+      },
+      token,
       message: "Login successful"
     });
 
@@ -230,7 +251,6 @@ export const updateUser = async (req: Request, res: Response) => {
       });
     }
 
-    // Check if username or email already exists (excluding current user)
     if (username || email) {
       const existingUser = await prisma.user.findFirst({
         where: {
@@ -255,7 +275,6 @@ export const updateUser = async (req: Request, res: Response) => {
     }
 
     const updatedUser = await prisma.$transaction(async (tx) => {
-      // Update user
       const user = await tx.user.update({
         where: { empCode },
         data: {
@@ -269,7 +288,6 @@ export const updateUser = async (req: Request, res: Response) => {
         }
       });
 
-      // Update userLocation username if username changed
       if (username) {
         await tx.userLocation.update({
           where: { empCode },

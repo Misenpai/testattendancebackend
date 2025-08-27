@@ -84,8 +84,12 @@ model Attendance {
   sessionType   SessionType       
   attendanceType AttendanceType?  
   isCheckedOut  Boolean          @default(false)
+  
+  // New fields for location coordinates
+  latitude      Float?            @db.Float
+  longitude     Float?            @db.Float
+  
   createdAt     DateTime          @default(now())
-
 
   user           User              @relation(fields: [empCode], references: [empCode], onDelete: Cascade)
   photos         AttendancePhoto[]
@@ -99,6 +103,7 @@ model Attendance {
   @@index([empCode])
   @@index([sessionType])
   @@index([attendanceType])
+  @@index([isCheckedOut])
 }
 
 model AttendanceDate {
