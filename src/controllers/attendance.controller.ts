@@ -1,5 +1,9 @@
 import type { Request, Response } from "express";
-import { PrismaClient, SessionType, AttendanceType } from "../../generated/prisma/index.js";
+import {
+  PrismaClient,
+  SessionType,
+  AttendanceType,
+} from "../../generated/prisma/index.js";
 import path from "path";
 
 const prisma = new PrismaClient();
@@ -9,7 +13,7 @@ function getSessionType(time: Date): SessionType {
   const hours = time.getHours();
   const minutes = time.getMinutes();
   const timeInMinutes = hours * 60 + minutes;
-  
+
   // Forenoon: 9:30 AM (570 mins) to 1:00 PM (780 mins)
   if (timeInMinutes >= 570 && timeInMinutes < 780) {
     return SessionType.FORENOON;
@@ -18,7 +22,7 @@ function getSessionType(time: Date): SessionType {
   else if (timeInMinutes >= 780 && timeInMinutes <= 1050) {
     return SessionType.AFTERNOON;
   }
-  
+
   // If outside working hours, determine based on closest session
   if (timeInMinutes < 570) {
     return SessionType.FORENOON; // Early morning counts as forenoon
@@ -32,7 +36,7 @@ function determineAttendanceType(
   checkOutTime: Date
 ): AttendanceType {
   const checkOutHours = checkOutTime.getHours();
-  
+
   if (checkInSession === SessionType.FORENOON) {
     // If checked in during forenoon and checked out after 3 PM, it's full day
     if (checkOutHours >= 15) {
@@ -50,26 +54,34 @@ export const createAttendance = async (req: Request, res: Response) => {
   try {
     console.log("Received request body:", req.body);
     console.log("Received files:", req.files);
-    
-    const { username, location, photoType, audioDuration, latitude, longitude } = req.body;
 
-    // Add validation
-    if (!username || username === 'undefined') {
+    const {
+      username,
+      location,
+      photoType,
+      audioDuration,
+      latitude,
+      longitude,
+    } = req.body;
+
+    if (!username || username === "undefined") {
       console.log("Username is missing or undefined:", username);
-      return res.status(400).json({ error: "Username is required and cannot be undefined" });
+      return res
+        .status(400)
+        .json({ error: "Username is required and cannot be undefined" });
     }
 
     console.log("Processing attendance for:", {
       username,
-      location: location || 'Not provided',
-      photoType: photoType || 'Not provided',
-      audioDuration: audioDuration || 'Not provided',
-      latitude: latitude || 'Not provided',
-      longitude: longitude || 'Not provided'
+      location: location || "Not provided",
+      photoType: photoType || "Not provided",
+      audioDuration: audioDuration || "Not provided",
+      latitude: latitude || "Not provided",
+      longitude: longitude || "Not provided",
     });
 
     const user = await prisma.user.findFirst({
-      where: { username: username },
+      where: { username },
       include: {
         userLocation: {
           include: {
@@ -77,32 +89,30 @@ export const createAttendance = async (req: Request, res: Response) => {
               where: {
                 isActive: true,
                 startDate: { lte: new Date() },
-                endDate: { gte: new Date() }
-              }
-            }
-          }
-        }
-      }
+                endDate: { gte: new Date() },
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Check if user is on field trip
-    const isOnFieldTrip = user.userLocation?.fieldTrips && user.userLocation.fieldTrips.length > 0;
-    
-    // Get current time and determine session
+    // Check if user is on field trip (guard length against undefined)
+    const isOnFieldTrip = (user.userLocation?.fieldTrips?.length ?? 0) > 0;
+
     const currentTime = new Date();
     const sessionType = getSessionType(currentTime);
-    
-    // Get today's date in LOCAL timezone
+
+    // Today’s date normalized to local midnight
     const today = new Date();
     const localDate = new Date(
       Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
     );
 
-    // Check if attendance already exists for today
     const existingAttendance = await prisma.attendance.findUnique({
       where: {
         empCode_date: {
@@ -112,13 +122,7 @@ export const createAttendance = async (req: Request, res: Response) => {
       },
     });
 
-    if (existingAttendance && !existingAttendance.isCheckedOut) {
-      return res.status(409).json({
-        error: "Attendance already marked for today. Please checkout first.",
-        existingAttendance,
-      });
-    }
-
+    // Allow re-checkin if not checked out
     if (existingAttendance && existingAttendance.isCheckedOut) {
       return res.status(409).json({
         error: "You have already completed your attendance for today.",
@@ -148,25 +152,44 @@ export const createAttendance = async (req: Request, res: Response) => {
       : null;
 
     const parsedAudioDuration = audioDuration ? parseInt(audioDuration) : null;
-    
-    // Parse coordinates
     const lat = latitude ? parseFloat(latitude) : null;
     const lng = longitude ? parseFloat(longitude) : null;
 
-    // Determine final location - if on field trip and location is within IIT, mark as "Outside IIT (Field Trip)"
+    // Always override location for field trip
     let finalLocation = location || null;
     if (isOnFieldTrip) {
-      // If user is on field trip, always mark location with field trip indicator
-      if (location && !location.includes("Outside")) {
-        finalLocation = `Outside IIT (Field Trip)`;
-      } else if (!location) {
-        finalLocation = "Outside IIT (Field Trip)";
-      }
+      finalLocation = "Outside IIT (Field Trip)";
     }
 
     // Start transaction
     const attendance = await prisma.$transaction(async (tx) => {
-      // Create attendance record with session type and coordinates
+      if (existingAttendance && !existingAttendance.isCheckedOut) {
+        // Re-checkin → update existing record
+        const updatedAttendance = await tx.attendance.update({
+          where: { attendanceKey: existingAttendance.attendanceKey },
+          data: {
+            checkInTime: currentTime,
+            sessionType,
+            takenLocation: finalLocation,
+            latitude: lat,
+            longitude: lng,
+            photos: {
+              deleteMany: {},
+              create: photoData,
+            },
+            ...(audioUrl && {
+              audio: {
+                deleteMany: {},
+                create: [{ audioUrl, duration: parsedAudioDuration }],
+              },
+            }),
+          },
+          include: { photos: true, audio: true },
+        });
+        return updatedAttendance;
+      }
+
+      // First check-in of the day → create new attendance
       const newAttendance = await tx.attendance.create({
         data: {
           empCode: user.empCode,
@@ -174,46 +197,40 @@ export const createAttendance = async (req: Request, res: Response) => {
           takenLocation: finalLocation,
           date: localDate,
           checkInTime: currentTime,
-          sessionType: sessionType,
+          sessionType,
           isCheckedOut: false,
           latitude: lat,
           longitude: lng,
-          photos: {
-            create: photoData,
-          },
+          photos: { create: photoData },
           ...(audioUrl && {
             audio: {
-              create: [
-                {
-                  audioUrl: audioUrl,
-                  duration: parsedAudioDuration,
-                },
-              ],
+              create: [{ audioUrl, duration: parsedAudioDuration }],
             },
           }),
         },
-        include: {
-          photos: true,
-          audio: true,
-        },
+        include: { photos: true, audio: true },
       });
 
-      // Create attendance date record
+      // Create or update attendanceDate
       const dayOfWeek = localDate.getDay();
       const weekOfYear = getWeekOfYear(localDate);
 
-      await tx.attendanceDate.create({
-        data: {
+      await tx.attendanceDate.upsert({
+        where: { empCode_date: { empCode: user.empCode, date: localDate } },
+        update: {
+          isPresent: true,
+          attendanceRef: newAttendance.attendanceKey,
+        },
+        create: {
           empCode: user.empCode,
           date: localDate,
           year: localDate.getFullYear(),
           month: localDate.getMonth() + 1,
           day: localDate.getDate(),
-          dayOfWeek: dayOfWeek,
-          weekOfYear: weekOfYear,
+          dayOfWeek,
+          weekOfYear,
           isPresent: true,
           attendanceRef: newAttendance.attendanceKey,
-          // Don't set attendanceType yet - will be set on checkout
         },
       });
 
@@ -226,7 +243,9 @@ export const createAttendance = async (req: Request, res: Response) => {
       data: {
         ...attendance,
         sessionType,
-        message: `Check-in successful for ${sessionType} session. Remember to checkout.`
+        message: existingAttendance
+          ? `Re-checkin updated for ${sessionType} session.`
+          : `Check-in successful for ${sessionType} session. Remember to checkout.`,
       },
     });
   } catch (error: any) {
@@ -352,7 +371,9 @@ export const getAttendanceCalendar = async (req: Request, res: Response) => {
     const queryYear = req.query.year
       ? parseInt(req.query.year as string)
       : new Date().getFullYear();
-    const queryMonth = req.query.month ? parseInt(req.query.month as string) : null;
+    const queryMonth = req.query.month
+      ? parseInt(req.query.month as string)
+      : null;
 
     let whereCondition: any = {
       empCode: empCode,
@@ -386,18 +407,18 @@ export const getAttendanceCalendar = async (req: Request, res: Response) => {
 
     // Calculate statistics - count not checked out as present with 0.5 weight
     const totalFullDays = attendanceDates.filter(
-      d => d.attendanceType === AttendanceType.FULL_DAY
+      (d) => d.attendanceType === AttendanceType.FULL_DAY
     ).length;
     const totalHalfDays = attendanceDates.filter(
-      d => d.attendanceType === AttendanceType.HALF_DAY
+      (d) => d.attendanceType === AttendanceType.HALF_DAY
     ).length;
     const notCheckedOut = attendanceDates.filter(
-      d => d.attendance && !d.attendance.isCheckedOut
+      (d) => d.attendance && !d.attendance.isCheckedOut
     ).length;
-    
+
     // Count not checked out as half day for statistics
-    const totalDays = totalFullDays + ((totalHalfDays + notCheckedOut) * 0.5);
-    
+    const totalDays = totalFullDays + (totalHalfDays + notCheckedOut) * 0.5;
+
     const currentStreak = calculateCurrentStreak(attendanceDates);
 
     res.status(200).json({
@@ -499,10 +520,13 @@ function calculateCurrentStreak(attendanceDates: any[]): number {
       streak += 1;
     } else if (sortedDates[i].attendanceType === AttendanceType.HALF_DAY) {
       streak += 0.5;
-    } else if (sortedDates[i].attendance && !sortedDates[i].attendance.isCheckedOut) {
+    } else if (
+      sortedDates[i].attendance &&
+      !sortedDates[i].attendance.isCheckedOut
+    ) {
       streak += 0.5; // Count not checked out as half day
     }
-    
+
     // Check if streak continues
     if (i < sortedDates.length - 1) {
       const prevDate = new Date(sortedDates[i].date);
@@ -510,7 +534,7 @@ function calculateCurrentStreak(attendanceDates: any[]): number {
       const dayDiff = Math.floor(
         (prevDate.getTime() - currDate.getTime()) / (1000 * 60 * 60 * 24)
       );
-      
+
       if (dayDiff !== 1) {
         break; // Streak broken
       }
@@ -564,7 +588,7 @@ async function updateAttendanceCalendar(
     const maskValue = attendanceType === AttendanceType.FULL_DAY ? "2" : "1";
     const newMask =
       daysMask.substring(0, day - 1) + maskValue + daysMask.substring(day);
-    
+
     // Count full and half days
     const fullDays = (newMask.match(/2/g) || []).length;
     const halfDays = (newMask.match(/1/g) || []).length;
@@ -622,7 +646,7 @@ export const getAllUsersWithAttendance = async (
                 isActive: true,
               },
               orderBy: {
-                startDate: 'asc',
+                startDate: "asc",
               },
             },
           },
@@ -649,54 +673,56 @@ export const getAllUsersWithAttendance = async (
     });
 
     // Calculate attendance statistics for each user
-    const formattedUsers = await Promise.all(users.map(async (user) => {
-      const fullDays = user.attendances.filter(
-        a => a.attendanceType === 'FULL_DAY'
-      ).length;
-      const halfDays = user.attendances.filter(
-        a => a.attendanceType === 'HALF_DAY'
-      ).length;
-      const notCheckedOut = user.attendances.filter(
-        a => !a.isCheckedOut
-      ).length;
-      const totalDays = fullDays + ((halfDays + notCheckedOut) * 0.5);
+    const formattedUsers = await Promise.all(
+      users.map(async (user) => {
+        const fullDays = user.attendances.filter(
+          (a) => a.attendanceType === "FULL_DAY"
+        ).length;
+        const halfDays = user.attendances.filter(
+          (a) => a.attendanceType === "HALF_DAY"
+        ).length;
+        const notCheckedOut = user.attendances.filter(
+          (a) => !a.isCheckedOut
+        ).length;
+        const totalDays = fullDays + (halfDays + notCheckedOut) * 0.5;
 
-      return {
-        id: user.userKey,
-        empCode: user.empCode,
-        username: user.username,
-        email: user.email,
-        department: user.location,
-        isActive: user.isActive,
-        locationType: user.userLocation?.locationType || "ABSOLUTE",
-        fieldTrips: user.userLocation?.fieldTrips || [],
-        monthlyStatistics: {
-          totalDays,
-          fullDays,
-          halfDays,
-          notCheckedOut,
-        },
-        attendances: user.attendances.map((att) => ({
-          date: att.date,
-          checkInTime: att.checkInTime,
-          checkOutTime: att.checkOutTime,
-          sessionType: att.sessionType,
-          attendanceType: att.attendanceType,
-          isCheckedOut: att.isCheckedOut,
-          location: att.takenLocation,
-          latitude: att.latitude,
-          longitude: att.longitude,
-          photos: att.photos.map((p) => ({
-            url: p.photoUrl,
-            type: p.photoType,
+        return {
+          id: user.userKey,
+          empCode: user.empCode,
+          username: user.username,
+          email: user.email,
+          department: user.location,
+          isActive: user.isActive,
+          locationType: user.userLocation?.locationType || "ABSOLUTE",
+          fieldTrips: user.userLocation?.fieldTrips || [],
+          monthlyStatistics: {
+            totalDays,
+            fullDays,
+            halfDays,
+            notCheckedOut,
+          },
+          attendances: user.attendances.map((att) => ({
+            date: att.date,
+            checkInTime: att.checkInTime,
+            checkOutTime: att.checkOutTime,
+            sessionType: att.sessionType,
+            attendanceType: att.attendanceType,
+            isCheckedOut: att.isCheckedOut,
+            location: att.takenLocation,
+            latitude: att.latitude,
+            longitude: att.longitude,
+            photos: att.photos.map((p) => ({
+              url: p.photoUrl,
+              type: p.photoType,
+            })),
+            audio: att.audio.map((a) => ({
+              url: a.audioUrl,
+              duration: a.duration,
+            })),
           })),
-          audio: att.audio.map((a) => ({
-            url: a.audioUrl,
-            duration: a.duration,
-          })),
-        })),
-      };
-    }));
+        };
+      })
+    );
 
     res.status(200).json({
       success: true,
@@ -749,7 +775,7 @@ export const getUserAttendanceSummary = async (req: Request, res: Response) => {
         },
       },
       orderBy: {
-        date: 'desc',
+        date: "desc",
       },
     });
 
@@ -762,20 +788,41 @@ export const getUserAttendanceSummary = async (req: Request, res: Response) => {
     });
 
     const currentMonthStats = {
-      totalDays: currentMonthAttendances.filter(a => a.attendanceType === 'FULL_DAY').length + 
-                 (currentMonthAttendances.filter(a => a.attendanceType === 'HALF_DAY').length * 0.5) +
-                 (currentMonthAttendances.filter(a => a.attendance && !a.attendance.isCheckedOut).length * 0.5),
-      fullDays: currentMonthAttendances.filter(a => a.attendanceType === 'FULL_DAY').length,
-      halfDays: currentMonthAttendances.filter(a => a.attendanceType === 'HALF_DAY').length,
-      notCheckedOut: currentMonthAttendances.filter(a => a.attendance && !a.attendance.isCheckedOut).length,
+      totalDays:
+        currentMonthAttendances.filter((a) => a.attendanceType === "FULL_DAY")
+          .length +
+        currentMonthAttendances.filter((a) => a.attendanceType === "HALF_DAY")
+          .length *
+          0.5 +
+        currentMonthAttendances.filter(
+          (a) => a.attendance && !a.attendance.isCheckedOut
+        ).length *
+          0.5,
+      fullDays: currentMonthAttendances.filter(
+        (a) => a.attendanceType === "FULL_DAY"
+      ).length,
+      halfDays: currentMonthAttendances.filter(
+        (a) => a.attendanceType === "HALF_DAY"
+      ).length,
+      notCheckedOut: currentMonthAttendances.filter(
+        (a) => a.attendance && !a.attendance.isCheckedOut
+      ).length,
       presentDays: currentMonthAttendances.length,
     };
 
     const yearToDateStats = {
-      totalDays: yearToDateAttendances.filter(a => a.attendanceType === 'FULL_DAY').length + 
-                 (yearToDateAttendances.filter(a => a.attendanceType === 'HALF_DAY').length * 0.5),
-      fullDays: yearToDateAttendances.filter(a => a.attendanceType === 'FULL_DAY').length,
-      halfDays: yearToDateAttendances.filter(a => a.attendanceType === 'HALF_DAY').length,
+      totalDays:
+        yearToDateAttendances.filter((a) => a.attendanceType === "FULL_DAY")
+          .length +
+        yearToDateAttendances.filter((a) => a.attendanceType === "HALF_DAY")
+          .length *
+          0.5,
+      fullDays: yearToDateAttendances.filter(
+        (a) => a.attendanceType === "FULL_DAY"
+      ).length,
+      halfDays: yearToDateAttendances.filter(
+        (a) => a.attendanceType === "HALF_DAY"
+      ).length,
       presentDays: yearToDateAttendances.length,
     };
 
@@ -825,8 +872,12 @@ export const getUserAttendanceDetails = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const queryYear = year ? parseInt(year as string) : new Date().getFullYear();
-    const queryMonth = month ? parseInt(month as string) : new Date().getMonth() + 1;
+    const queryYear = year
+      ? parseInt(year as string)
+      : new Date().getFullYear();
+    const queryMonth = month
+      ? parseInt(month as string)
+      : new Date().getMonth() + 1;
 
     const attendances = await prisma.attendance.findMany({
       where: {
@@ -842,15 +893,19 @@ export const getUserAttendanceDetails = async (req: Request, res: Response) => {
         attendanceDate: true,
       },
       orderBy: {
-        date: 'desc',
+        date: "desc",
       },
     });
 
     // Calculate statistics
-    const fullDays = attendances.filter(a => a.attendanceType === 'FULL_DAY').length;
-    const halfDays = attendances.filter(a => a.attendanceType === 'HALF_DAY').length;
-    const notCheckedOut = attendances.filter(a => !a.isCheckedOut).length;
-    const totalDays = fullDays + ((halfDays + notCheckedOut) * 0.5);
+    const fullDays = attendances.filter(
+      (a) => a.attendanceType === "FULL_DAY"
+    ).length;
+    const halfDays = attendances.filter(
+      (a) => a.attendanceType === "HALF_DAY"
+    ).length;
+    const notCheckedOut = attendances.filter((a) => !a.isCheckedOut).length;
+    const totalDays = fullDays + (halfDays + notCheckedOut) * 0.5;
 
     const statistics = {
       totalDays,
@@ -859,8 +914,10 @@ export const getUserAttendanceDetails = async (req: Request, res: Response) => {
       notCheckedOut,
       presentDays: attendances.length,
       workingDaysInMonth: getWorkingDaysInMonth(queryYear, queryMonth),
-      attendancePercentage: attendances.length > 0 ? 
-        (totalDays / getWorkingDaysInMonth(queryYear, queryMonth)) * 100 : 0,
+      attendancePercentage:
+        attendances.length > 0
+          ? (totalDays / getWorkingDaysInMonth(queryYear, queryMonth)) * 100
+          : 0,
     };
 
     res.status(200).json({
@@ -871,14 +928,14 @@ export const getUserAttendanceDetails = async (req: Request, res: Response) => {
           username: user.username,
           email: user.email,
           location: user.location,
-          locationType: user.userLocation?.locationType || 'ABSOLUTE',
+          locationType: user.userLocation?.locationType || "ABSOLUTE",
         },
         period: {
           year: queryYear,
           month: queryMonth,
         },
         statistics,
-        attendances: attendances.map(att => ({
+        attendances: attendances.map((att) => ({
           id: att.attendanceKey,
           date: att.date,
           checkInTime: att.checkInTime,
@@ -889,12 +946,12 @@ export const getUserAttendanceDetails = async (req: Request, res: Response) => {
           location: att.takenLocation,
           latitude: att.latitude,
           longitude: att.longitude,
-          photos: att.photos.map(p => ({
+          photos: att.photos.map((p) => ({
             id: p.photoKey,
             url: p.photoUrl,
             type: p.photoType,
           })),
-          audio: att.audio.map(a => ({
+          audio: att.audio.map((a) => ({
             id: a.audioKey,
             url: a.audioUrl,
             duration: a.duration,
@@ -912,7 +969,7 @@ export const getUserAttendanceDetails = async (req: Request, res: Response) => {
 function getWorkingDaysInMonth(year: number, month: number): number {
   const lastDay = new Date(year, month, 0).getDate();
   let workingDays = 0;
-  
+
   for (let day = 1; day <= lastDay; day++) {
     const date = new Date(year, month - 1, day);
     const dayOfWeek = date.getDay();
@@ -921,6 +978,6 @@ function getWorkingDaysInMonth(year: number, month: number): number {
       workingDays++;
     }
   }
-  
+
   return workingDays;
 }
