@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "seed": "tsx src/scripts/seed.ts",
+    "seed:projects": "tsx -e \"import('./src/config/db.js').then(db => db.seedProjectsData().then(() => process.exit(0)))\"",
+    "seed:holidays": "tsx src/scripts/seed-holidays.ts"
   },
   "type": "module",
   "keywords": [],

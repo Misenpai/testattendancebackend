@@ -4,6 +4,7 @@
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/prisma"
+    binaryTargets = ["native", "linux-musl", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -11,185 +12,240 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Enums
 enum LocationType {
   ABSOLUTE
   APPROX
   FIELDTRIP
 }
 
-enum UserRole {
-  USER
-  SYSTEM
+enum AttendanceSession {
+  FN  // Forenoon
+  AF  // Afternoon
 }
 
-enum SessionType {
-  FORENOON  
-  AFTERNOON 
-}
-
-enum AttendanceType {
-  FULL_DAY
-  HALF_DAY
-}
-
+// User Table
 model User {
-  userKey     String            @id @default(cuid())
-  empCode     String            @unique @db.VarChar(255)
-  username    String            @unique @db.VarChar(255)
-  email       String            @unique @db.VarChar(255)
-  password    String            @db.VarChar(255)
-  location    String            @default("all") @db.VarChar(255)
-  role        UserRole          @default(USER)
-  isActive    Boolean           @default(true)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  employeeNumber    String    @id @db.VarChar(255)
+  username          String    @unique @db.VarChar(255)
+  empClass          String    @default("PJ") @db.VarChar(10)
+  dateOfResign      DateTime? @db.Date
 
-
-  userLocation         UserLocation?
-  attendances          Attendance[]
-  attendanceDates      AttendanceDate[]
+  // Relations
+  userProjects  UserProjectRelation[]
+  attendances   Attendance[]
+  fieldTrips    FieldTrip[]
 
   @@map("users")
-  @@index([role])
-  @@index([isActive])
-  @@index([empCode])
+  @@index([username])
+  @@index([empClass])
 }
 
-model UserLocation {
-  locationKey  String       @id @default(cuid())
-  empCode      String       @unique @db.VarChar(255)
-  username     String       @db.VarChar(255)
-  locationType LocationType @default(ABSOLUTE)
-  updatedAt    DateTime     @updatedAt
-  createdAt    DateTime     @default(now())
-  
-  approxLat    Float?       @db.Float
-  approxLng    Float?       @db.Float
-  approxRadius Int?         @default(100)
-  user         User         @relation(fields: [empCode], references: [empCode], onDelete: Cascade)
-  fieldTrips   FieldTrip[]
+// Project Table 
+model Project {
+  projectCode   String   @id @db.VarChar(255)
+  department    String   @db.VarChar(255)
 
-  @@map("user_locations")
+  // Relations
+  userProjects UserProjectRelation[]
+  piProjects   PIProjectRelation[]
+  pis          PI[]
+
+  @@map("projects")
+  @@index([department])
+}
+
+// User-Project Relation Table
+model UserProjectRelation {
+  relationKey    String @id @default(cuid())
+  employeeNumber String @db.VarChar(255)
+  username       String @db.VarChar(255)
+  projectCode    String @db.VarChar(255)
+
+  // Relations
+  user    User    @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
+  project Project @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+
+  @@map("user_project_relations")
+  @@unique([employeeNumber, projectCode])
+  @@index([employeeNumber])
+  @@index([projectCode])
+  @@index([username])
+}
+
+// PI Table
+model PI {
+  principalInvestigatorKey String  @id @default(cuid())
+  username                 String  @unique @db.VarChar(255)
+  password                 String  @db.VarChar(255)
+  projectCode              String  @db.VarChar(255)
+
+  // Relations
+  project    Project             @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+  piProjects PIProjectRelation[]
+
+  @@map("pis")
+  @@index([projectCode])
+  @@index([username])
+}
+
+// PI-Project Relation Table
+model PIProjectRelation {
+  relationKey              String @id @default(cuid())
+  principalInvestigatorKey String @db.VarChar(255)
+  projectCode              String @db.VarChar(255)
+
+  // Relations
+  pi      PI      @relation(fields: [principalInvestigatorKey], references: [principalInvestigatorKey], onDelete: Cascade)
+  project Project @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+
+  @@map("pi_project_relations")
+  @@unique([principalInvestigatorKey, projectCode])
+  @@index([principalInvestigatorKey])
+  @@index([projectCode])
+}
+
+// Main Attendance Table
+model Attendance {
+  attendanceRecordKey String       @id @default(cuid())
+  employeeNumber      String       @db.VarChar(255)
+  username            String       @db.VarChar(255)
+  attendanceGiven     Boolean      @default(false)
+  locationType        LocationType @default(APPROX)
+
+  // Relations
+  user               User                 @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
+  attendanceCalendar AttendanceCalendar?
+  locationAttendance LocationAttendance?
+  attendanceType     AttendanceType?
+  photos             AttendancePhoto[]
+  audio              AttendanceAudio[]
+
+  @@map("attendances")
+  @@index([employeeNumber])
+  @@index([username])
+  @@index([attendanceGiven])
   @@index([locationType])
 }
 
-model Attendance {
-  attendanceKey String            @id @default(cuid())
-  empCode       String            @db.VarChar(255)
-  username      String            @db.VarChar(255)
-  takenLocation String?           @db.VarChar(255)
-  date          DateTime          @db.Date
-  checkInTime   DateTime          @default(now())
-  checkOutTime  DateTime?
-  sessionType   SessionType       
-  attendanceType AttendanceType?  
-  isCheckedOut  Boolean          @default(false)
-  
-  // New fields for location coordinates
-  latitude      Float?            @db.Float
-  longitude     Float?            @db.Float
-  
-  createdAt     DateTime          @default(now())
-
-  user           User              @relation(fields: [empCode], references: [empCode], onDelete: Cascade)
-  photos         AttendancePhoto[]
-  audio          AttendanceAudio[]
-  attendanceDate AttendanceDate?
-
-  @@map("attendance")
-  @@unique([empCode, date])
-  @@index([date])
-  @@index([empCode, date])
-  @@index([empCode])
-  @@index([sessionType])
-  @@index([attendanceType])
-  @@index([isCheckedOut])
-}
-
-model AttendanceDate {
-  dateKey      String         @id @default(cuid())
-  empCode      String         @db.VarChar(255)
-  date         DateTime       @db.Date
-  year         Int
-  month        Int            
-  day          Int            
-  dayOfWeek    Int            
-  weekOfYear   Int            
-  isPresent    Boolean        @default(true)
-  attendanceType AttendanceType? 
-  attendanceRef String         @unique
-  createdAt    DateTime       @default(now())
-
-
-  user         User       @relation(fields: [empCode], references: [empCode], onDelete: Cascade)
-  attendance   Attendance @relation(fields: [attendanceRef], references: [attendanceKey], onDelete: Cascade)
-
-  @@map("attendance_dates")
-  @@unique([empCode, date])
-  @@index([empCode, year, month])
-  @@index([empCode, date])
-  @@index([year, month])
-  @@index([empCode])
-}
-
-model AttendancePhoto {
-  photoKey     String     @id @default(cuid())
-  attendanceRef String
-  photoUrl     String     @db.VarChar(500)
-  photoType    String?    @db.VarChar(50)
-  createdAt    DateTime   @default(now())
-  
-  attendance   Attendance @relation(fields: [attendanceRef], references: [attendanceKey], onDelete: Cascade)
-
-  @@map("attendance_photos")
-  @@index([attendanceRef])
-}
-
-model AttendanceAudio {
-  audioKey     String     @id @default(cuid())
-  attendanceRef String
-  audioUrl     String     @db.VarChar(500)
-  duration     Int?      
-  createdAt    DateTime   @default(now())
-  
-  attendance   Attendance @relation(fields: [attendanceRef], references: [attendanceKey], onDelete: Cascade)
-
-  @@map("attendance_audio")
-  @@index([attendanceRef])
-}
-
-
+// Attendance Calendar Table - contains date of attendance
 model AttendanceCalendar {
-  calendarKey  String   @id @default(cuid())
-  empCode      String   @db.VarChar(255)
-  year         Int
-  month        Int      
-  daysMask     String   @db.VarChar(31) 
-  totalFullDays Int   @default(0)
-  totalHalfDays Int   @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  calendarEntryKey    String   @id @default(cuid())
+  attendanceRecordKey String   @unique @db.VarChar(191)
+  day                 DateTime @db.Date
+  present             Int      @default(0) @db.TinyInt
+  absent              Int      @default(1) @db.TinyInt
+  
+  // Relations
+  attendance Attendance @relation(fields: [attendanceRecordKey], references: [attendanceRecordKey], onDelete: Cascade)
 
   @@map("attendance_calendar")
-  @@unique([empCode, year, month])
-  @@index([empCode])
-  @@index([year, month])
+  @@index([day])
+  @@index([attendanceRecordKey])
+  @@index([present])
+  @@index([absent])
 }
 
+// Location Attendance Table - contains location data
+model LocationAttendance {
+  locationRecordKey   String   @id @default(cuid())
+  attendanceRecordKey String   @unique @db.VarChar(191)
+  latitude            Float?   @db.Float
+  longitude           Float?   @db.Float
+  county              String?  @db.VarChar(255)
+  state               String?  @db.VarChar(255)
+  postcode            String?  @db.VarChar(20)
+
+  // Relations
+  attendance Attendance @relation(fields: [attendanceRecordKey], references: [attendanceRecordKey], onDelete: Cascade)
+
+  @@map("location_attendances")
+  @@index([latitude, longitude])
+  @@index([attendanceRecordKey])
+}
+
+// Attendance Type Table - contains attendance details
+model AttendanceType {
+  attendanceTypeKey     String             @id @default(cuid())
+  attendanceRecordKey   String             @unique @db.VarChar(191)
+  halfDay               Boolean            @default(false)
+  fullDay               Boolean            @default(false)
+  isCheckout            Boolean            @default(false)
+  attendanceGivenTime   AttendanceSession? 
+  checkoutTime          DateTime?
+  checkinTime           DateTime?
+  takenLocation         String?            @db.VarChar(255)
+
+  // Relations
+  attendance Attendance @relation(fields: [attendanceRecordKey], references: [attendanceRecordKey], onDelete: Cascade)
+
+  @@map("attendance_types")
+  @@index([halfDay])
+  @@index([fullDay])
+  @@index([isCheckout])
+  @@index([attendanceGivenTime])
+  @@index([attendanceRecordKey])
+}
+
+// Calendar Table - contains holidays and weekends
+model Calendar {
+  calendarKey String   @id @default(cuid())
+  date        DateTime @unique @db.Date
+  description String?  @db.VarChar(255)
+  isHoliday   Boolean  @default(true)
+  isWeekend   Boolean  @default(false)
+
+  @@map("calendar")
+  @@index([date])
+  @@index([isHoliday])
+  @@index([isWeekend])
+}
+
+// Attendance Photos Table
+model AttendancePhoto {
+  photoRecordKey      String @id @default(cuid())
+  attendanceRecordKey String @db.VarChar(191)
+  photoUrl            String @db.VarChar(500)
+  photoType           String? @db.VarChar(50)
+
+  // Relations
+  attendance Attendance @relation(fields: [attendanceRecordKey], references: [attendanceRecordKey], onDelete: Cascade)
+
+  @@map("attendance_photos")
+  @@index([attendanceRecordKey])
+}
+
+// Attendance Audio Table
+model AttendanceAudio {
+  audioRecordKey      String @id @default(cuid())
+  attendanceRecordKey String @db.VarChar(191)
+  audioUrl            String @db.VarChar(500)
+  duration            Int?
+
+  // Relations
+  attendance Attendance @relation(fields: [attendanceRecordKey], references: [attendanceRecordKey], onDelete: Cascade)
+
+  @@map("attendance_audio")
+  @@index([attendanceRecordKey])
+}
+
+// Field Trip Table
 model FieldTrip {
-  tripKey      String     @id @default(cuid())
-  empCode      String     @db.VarChar(255)
-  startDate    DateTime   @db.Date
-  endDate      DateTime   @db.Date
-  description  String?    @db.Text
-  createdBy    String     @db.VarChar(255)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  isActive     Boolean    @default(true)
-  userLocation UserLocation @relation(fields: [empCode], references: [empCode], onDelete: Cascade)
+  fieldTripKey String   @id @default(cuid())
+  employeeNumber String @db.VarChar(255)
+  username     String   @db.VarChar(255)
+  startDate    DateTime @db.Date
+  endDate      DateTime @db.Date
+  description  String?  @db.Text
+  createdBy    String   @db.VarChar(255)
+  isActive     Boolean  @default(true)
+
+  // Relations
+  user User @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
 
   @@map("field_trips")
-  @@index([empCode])
+  @@index([employeeNumber])
+  @@index([username])
   @@index([startDate, endDate])
   @@index([isActive])
 }
