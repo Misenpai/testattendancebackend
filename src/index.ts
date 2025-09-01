@@ -6,15 +6,10 @@ import { fileURLToPath } from 'url';
 import { connectDB } from './config/db.js';
 import attendanceRoutes from './routes/attendance.route.js';
 import userRoutes from './routes/user.route.js';
-import userIITRoutes from './routes/user.iit.route.js';
-import userLocationRoutes from './routes/userLocation.route.js';
-import profileRoutes from './routes/profile.route.js';
-import { FieldTripScheduler } from './services/fieldTripSchedular.js';
+import calendarRoutes from './routes/calendar.route.js';
 import os from 'os';
-import testRoute from './routes/test.route.js';
 
 dotenv.config();
-connectDB();
 
 const app = express();
 
@@ -32,6 +27,7 @@ const uploadsPath = path.join(__dirname, '..', process.env.UPLOAD_DIR || 'upload
 app.use('/uploads', express.static(uploadsPath));
 app.use(express.static(uploadsPath));
 
+// Health check endpoints
 app.get('/api/test', (req, res) => {
   res.json({ 
     success: true, 
@@ -44,17 +40,12 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', uptime: process.uptime() });
 });
 
-// Your existing routes (for testing)
+// API Routes
+app.use('/api', userRoutes);
 app.use('/api', attendanceRoutes);
-app.use('/api', userRoutes);           // Your original login/signup
-app.use('/api', userIITRoutes);        // New IIT-integrated routes
-app.use('/api', userLocationRoutes);
-app.use('/api', profileRoutes);
-app.use('/api', testRoute)
+app.use('/api', calendarRoutes);
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
-
-
 
 function getLocalIPv4() {
   const nets = os.networkInterfaces();
@@ -68,24 +59,50 @@ function getLocalIPv4() {
   return 'localhost';
 }
 
-const localIP = getLocalIPv4();
+// Initialize database and start server
+async function startServer() {
+  try {
+    // Connect to database
+    const dbConnection = await connectDB();
+    if (!dbConnection.success) {
+      console.error('Failed to connect to database:', dbConnection.message);
+      process.exit(1);
+    }
+    console.log('✅ Database connected successfully');
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://0.0.0.0:${PORT}`);
-  console.log(`API available at http://${localIP}:${PORT}/api`);
-  console.log(`Uploads served from: ${uploadsPath}`);
-  
-  console.log('\n=== Available Authentication Endpoints ===');
-  console.log('Testing (Your Original):');
-  console.log(`  POST http://${localIP}:${PORT}/api/signup`);
-  console.log(`  POST http://${localIP}:${PORT}/api/login`);
-  console.log('\nProduction (IIT-Integrated):');
-  console.log(`  POST http://${localIP}:${PORT}/api/iit/login`);
-  console.log(`  GET  http://${localIP}:${PORT}/api/iit/test-connection`);
-  console.log('=========================================\n');
-  
-  // Start the field trip scheduler
-  const scheduler = FieldTripScheduler.getInstance();
-  scheduler.startScheduler();
-  console.log('Field trip scheduler started');
-});
+    const localIP = getLocalIPv4();
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`);
+      console.log(`📱 API available at http://${localIP}:${PORT}/api`);
+      console.log(`📁 Uploads served from: ${uploadsPath}`);
+      
+      console.log('\n=== Available API Endpoints ===');
+      console.log('\n🔐 Authentication:');
+      console.log(`  POST http://${localIP}:${PORT}/api/login`);
+      console.log(`  GET  http://${localIP}:${PORT}/api/user/:employeeNumber`);
+      
+      console.log('\n📅 Attendance:');
+      console.log(`  POST http://${localIP}:${PORT}/api/attendance`);
+      console.log(`  POST http://${localIP}:${PORT}/api/attendance/checkout`);
+      console.log(`  GET  http://${localIP}:${PORT}/api/attendance/today/:username`);
+      console.log(`  GET  http://${localIP}:${PORT}/api/attendance/calendar/:employeeNumber`);
+      
+      console.log('\n📆 Calendar:');
+      console.log(`  GET  http://${localIP}:${PORT}/api/calendar`);
+      console.log(`  GET  http://${localIP}:${PORT}/api/calendar/holidays`);
+      console.log(`  GET  http://${localIP}:${PORT}/api/calendar/working-days`);
+      console.log(`  POST http://${localIP}:${PORT}/api/calendar/holiday`);
+      
+      console.log('\n🔧 Admin:');
+      console.log(`  GET  http://${localIP}:${PORT}/api/admin/users-attendance`);
+      console.log('================================\n');
+    });
+
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();

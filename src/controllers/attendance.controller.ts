@@ -1,53 +1,52 @@
 import type { Request, Response } from "express";
-import {
-  PrismaClient,
-  SessionType,
-  AttendanceType,
-} from "../../generated/prisma/index.js";
+import { PrismaClient, AttendanceSession, LocationType } from "../../generated/prisma/index.js";
 import path from "path";
+import axios from "axios";
 
 const prisma = new PrismaClient();
 
+// Helper function to get location details from coordinates
+async function getLocationDetails(lat: number, lng: number) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`;
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'AttendanceApp/1.0'
+      }
+    });
+    
+    const data = response.data;
+    return {
+      county: data.address?.county || data.address?.city || data.address?.village || null,
+      state: data.address?.state || null,
+      postcode: data.address?.postcode || null
+    };
+  } catch (error) {
+    console.error('Error fetching location details:', error);
+    return { county: null, state: null, postcode: null };
+  }
+}
+
 // Helper function to determine session type based on time
-function getSessionType(time: Date): SessionType {
+function getSessionType(time: Date): AttendanceSession {
   const hours = time.getHours();
   const minutes = time.getMinutes();
   const timeInMinutes = hours * 60 + minutes;
 
   // Forenoon: 9:30 AM (570 mins) to 1:00 PM (780 mins)
   if (timeInMinutes >= 570 && timeInMinutes < 780) {
-    return SessionType.FORENOON;
+    return AttendanceSession.FN;
   }
   // Afternoon: 1:00 PM (780 mins) to 5:30 PM (1050 mins)
   else if (timeInMinutes >= 780 && timeInMinutes <= 1050) {
-    return SessionType.AFTERNOON;
+    return AttendanceSession.AF;
   }
 
   // If outside working hours, determine based on closest session
   if (timeInMinutes < 570) {
-    return SessionType.FORENOON; // Early morning counts as forenoon
+    return AttendanceSession.FN; // Early morning counts as forenoon
   }
-  return SessionType.AFTERNOON; // Late evening counts as afternoon
-}
-
-// Helper function to determine attendance type based on check-in and check-out
-function determineAttendanceType(
-  checkInSession: SessionType,
-  checkOutTime: Date
-): AttendanceType {
-  const checkOutHours = checkOutTime.getHours();
-
-  if (checkInSession === SessionType.FORENOON) {
-    // If checked in during forenoon and checked out after 3 PM, it's full day
-    if (checkOutHours >= 15) {
-      return AttendanceType.FULL_DAY;
-    }
-    // Otherwise it's half day
-    return AttendanceType.HALF_DAY;
-  } else {
-    // If checked in during afternoon, it's always half day
-    return AttendanceType.HALF_DAY;
-  }
+  return AttendanceSession.AF; // Late evening counts as afternoon
 }
 
 export const createAttendance = async (req: Request, res: Response) => {
@@ -62,6 +61,7 @@ export const createAttendance = async (req: Request, res: Response) => {
       audioDuration,
       latitude,
       longitude,
+      locationType = LocationType.APPROX
     } = req.body;
 
     if (!username || username === "undefined") {
@@ -74,8 +74,6 @@ export const createAttendance = async (req: Request, res: Response) => {
     console.log("Processing attendance for:", {
       username,
       location: location || "Not provided",
-      photoType: photoType || "Not provided",
-      audioDuration: audioDuration || "Not provided",
       latitude: latitude || "Not provided",
       longitude: longitude || "Not provided",
     });
@@ -83,47 +81,47 @@ export const createAttendance = async (req: Request, res: Response) => {
     const user = await prisma.user.findFirst({
       where: { username },
       include: {
-        userLocation: {
-          include: {
-            fieldTrips: {
-              where: {
-                isActive: true,
-                startDate: { lte: new Date() },
-                endDate: { gte: new Date() },
-              },
-            },
-          },
-        },
-      },
+        fieldTrips: {
+          where: {
+            isActive: true,
+            startDate: { lte: new Date() },
+            endDate: { gte: new Date() },
+          }
+        }
+      }
     });
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Check if user is on field trip (guard length against undefined)
-    const isOnFieldTrip = (user.userLocation?.fieldTrips?.length ?? 0) > 0;
+    // Check if user is on field trip
+    const isOnFieldTrip = user.fieldTrips.length > 0;
+    const finalLocationType = isOnFieldTrip ? LocationType.FIELDTRIP : locationType;
 
     const currentTime = new Date();
     const sessionType = getSessionType(currentTime);
 
-    // Today’s date normalized to local midnight
+    // Today's date normalized to local midnight
     const today = new Date();
     const localDate = new Date(
       Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
     );
 
-    const existingAttendance = await prisma.attendance.findUnique({
+    // Check if attendance already exists for today
+    const existingAttendance = await prisma.attendance.findFirst({
       where: {
-        empCode_date: {
-          empCode: user.empCode,
-          date: localDate,
-        },
+        employeeNumber: user.employeeNumber,
+        attendanceCalendar: {
+          day: localDate
+        }
       },
+      include: {
+        attendanceType: true
+      }
     });
 
-    // Allow re-checkin if not checked out
-    if (existingAttendance && existingAttendance.isCheckedOut) {
+    if (existingAttendance && existingAttendance.attendanceType?.isCheckout) {
       return res.status(409).json({
         error: "You have already completed your attendance for today.",
         existingAttendance,
@@ -134,7 +132,7 @@ export const createAttendance = async (req: Request, res: Response) => {
     const audioFile = files.find((f) => f.mimetype.startsWith("audio/"));
 
     const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const photoTypeValue = photoType || "front";
+    const photoTypeValue = photoType || "checkin";
 
     const photoData = files
       .filter((f) => f.mimetype.startsWith("image/"))
@@ -155,24 +153,51 @@ export const createAttendance = async (req: Request, res: Response) => {
     const lat = latitude ? parseFloat(latitude) : null;
     const lng = longitude ? parseFloat(longitude) : null;
 
-    // Always override location for field trip
-    let finalLocation = location || null;
+    // Get location details from coordinates
+    let locationDetails = { county: null, state: null, postcode: null };
+    if (lat && lng) {
+      locationDetails = await getLocationDetails(lat, lng);
+    }
+
+    // Determine location description
+    let takenLocation = location || null;
     if (isOnFieldTrip) {
-      finalLocation = "Outside IIT (Field Trip)";
+      takenLocation = "Outside IIT (Field Trip)";
     }
 
     // Start transaction
     const attendance = await prisma.$transaction(async (tx) => {
-      if (existingAttendance && !existingAttendance.isCheckedOut) {
+      if (existingAttendance && !existingAttendance.attendanceType?.isCheckout) {
         // Re-checkin → update existing record
         const updatedAttendance = await tx.attendance.update({
-          where: { attendanceKey: existingAttendance.attendanceKey },
+          where: { attendanceRecordKey: existingAttendance.attendanceRecordKey },
           data: {
-            checkInTime: currentTime,
-            sessionType,
-            takenLocation: finalLocation,
-            latitude: lat,
-            longitude: lng,
+            locationType: finalLocationType,
+            attendanceType: {
+              update: {
+                checkinTime: currentTime,
+                attendanceGivenTime: sessionType,
+                takenLocation
+              }
+            },
+            locationAttendance: {
+              upsert: {
+                create: {
+                  latitude: lat,
+                  longitude: lng,
+                  county: locationDetails.county,
+                  state: locationDetails.state,
+                  postcode: locationDetails.postcode
+                },
+                update: {
+                  latitude: lat,
+                  longitude: lng,
+                  county: locationDetails.county,
+                  state: locationDetails.state,
+                  postcode: locationDetails.postcode
+                }
+              }
+            },
             photos: {
               deleteMany: {},
               create: photoData,
@@ -184,7 +209,13 @@ export const createAttendance = async (req: Request, res: Response) => {
               },
             }),
           },
-          include: { photos: true, audio: true },
+          include: { 
+            photos: true, 
+            audio: true,
+            attendanceType: true,
+            locationAttendance: true,
+            attendanceCalendar: true
+          },
         });
         return updatedAttendance;
       }
@@ -192,15 +223,36 @@ export const createAttendance = async (req: Request, res: Response) => {
       // First check-in of the day → create new attendance
       const newAttendance = await tx.attendance.create({
         data: {
-          empCode: user.empCode,
+          employeeNumber: user.employeeNumber,
           username: user.username,
-          takenLocation: finalLocation,
-          date: localDate,
-          checkInTime: currentTime,
-          sessionType,
-          isCheckedOut: false,
-          latitude: lat,
-          longitude: lng,
+          attendanceGiven: true,
+          locationType: finalLocationType,
+          attendanceCalendar: {
+            create: {
+              day: localDate,
+              present: 1,
+              absent: 0
+            }
+          },
+          attendanceType: {
+            create: {
+              halfDay: sessionType === AttendanceSession.AF,
+              fullDay: false,
+              isCheckout: false,
+              attendanceGivenTime: sessionType,
+              checkinTime: currentTime,
+              takenLocation
+            }
+          },
+          locationAttendance: {
+            create: {
+              latitude: lat,
+              longitude: lng,
+              county: locationDetails.county,
+              state: locationDetails.state,
+              postcode: locationDetails.postcode
+            }
+          },
           photos: { create: photoData },
           ...(audioUrl && {
             audio: {
@@ -208,29 +260,12 @@ export const createAttendance = async (req: Request, res: Response) => {
             },
           }),
         },
-        include: { photos: true, audio: true },
-      });
-
-      // Create or update attendanceDate
-      const dayOfWeek = localDate.getDay();
-      const weekOfYear = getWeekOfYear(localDate);
-
-      await tx.attendanceDate.upsert({
-        where: { empCode_date: { empCode: user.empCode, date: localDate } },
-        update: {
-          isPresent: true,
-          attendanceRef: newAttendance.attendanceKey,
-        },
-        create: {
-          empCode: user.empCode,
-          date: localDate,
-          year: localDate.getFullYear(),
-          month: localDate.getMonth() + 1,
-          day: localDate.getDate(),
-          dayOfWeek,
-          weekOfYear,
-          isPresent: true,
-          attendanceRef: newAttendance.attendanceKey,
+        include: { 
+          photos: true, 
+          audio: true,
+          attendanceType: true,
+          locationAttendance: true,
+          attendanceCalendar: true
         },
       });
 
@@ -239,7 +274,7 @@ export const createAttendance = async (req: Request, res: Response) => {
 
     res.status(201).json({
       success: true,
-      id: attendance.attendanceKey,
+      id: attendance.attendanceRecordKey,
       data: {
         ...attendance,
         sessionType,
@@ -254,7 +289,6 @@ export const createAttendance = async (req: Request, res: Response) => {
   }
 };
 
-// New checkout endpoint
 export const checkoutAttendance = async (req: Request, res: Response) => {
   try {
     const { username } = req.body;
@@ -282,16 +316,17 @@ export const checkoutAttendance = async (req: Request, res: Response) => {
     );
 
     // Find today's attendance
-    const attendance = await prisma.attendance.findUnique({
+    const attendance = await prisma.attendance.findFirst({
       where: {
-        empCode_date: {
-          empCode: user.empCode,
-          date: localDate,
-        },
+        employeeNumber: user.employeeNumber,
+        attendanceCalendar: {
+          day: localDate
+        }
       },
       include: {
-        attendanceDate: true,
-      },
+        attendanceType: true,
+        attendanceCalendar: true
+      }
     });
 
     if (!attendance) {
@@ -300,57 +335,46 @@ export const checkoutAttendance = async (req: Request, res: Response) => {
       });
     }
 
-    if (attendance.isCheckedOut) {
+    if (attendance.attendanceType?.isCheckout) {
       return res.status(409).json({
         error: "You have already checked out for today.",
-        checkOutTime: attendance.checkOutTime,
+        checkOutTime: attendance.attendanceType.checkoutTime,
       });
     }
 
     const checkOutTime = new Date();
-    const attendanceType = determineAttendanceType(
-      attendance.sessionType,
-      checkOutTime
-    );
+    const checkInTime = attendance.attendanceType?.checkinTime || new Date();
+    const sessionType = attendance.attendanceType?.attendanceGivenTime || AttendanceSession.FN;
 
-    // Update attendance with checkout time and type
-    const updatedAttendance = await prisma.$transaction(async (tx) => {
-      // Update main attendance record
-      const updated = await tx.attendance.update({
-        where: { attendanceKey: attendance.attendanceKey },
-        data: {
-          checkOutTime: checkOutTime,
-          attendanceType: attendanceType,
-          isCheckedOut: true,
-        },
-      });
+    // Determine if it's full day or half day
+    const hoursWorked = (checkOutTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
+    const isFullDay = sessionType === AttendanceSession.FN && hoursWorked >= 6;
 
-      // Update attendance date with type
-      if (attendance.attendanceDate) {
-        await tx.attendanceDate.update({
-          where: { dateKey: attendance.attendanceDate.dateKey },
-          data: {
-            attendanceType: attendanceType,
-          },
-        });
+    // Update attendance with checkout
+    const updatedAttendance = await prisma.attendance.update({
+      where: { attendanceRecordKey: attendance.attendanceRecordKey },
+      data: {
+        attendanceType: {
+          update: {
+            checkoutTime: checkOutTime,
+            isCheckout: true,
+            fullDay: isFullDay,
+            halfDay: !isFullDay
+          }
+        }
+      },
+      include: {
+        attendanceType: true,
+        attendanceCalendar: true,
+        locationAttendance: true
       }
-
-      // Update calendar
-      await updateAttendanceCalendar(
-        tx,
-        user.empCode,
-        localDate,
-        attendanceType
-      );
-
-      return updated;
     });
 
     res.status(200).json({
       success: true,
       data: {
         ...updatedAttendance,
-        message: `Checkout successful. Attendance marked as ${attendanceType}.`,
+        message: `Checkout successful. Attendance marked as ${isFullDay ? 'FULL_DAY' : 'HALF_DAY'}.`,
       },
     });
   } catch (error: any) {
@@ -359,93 +383,6 @@ export const checkoutAttendance = async (req: Request, res: Response) => {
   }
 };
 
-// Get attendance calendar data with half/full day info
-export const getAttendanceCalendar = async (req: Request, res: Response) => {
-  try {
-    const { empCode } = req.params;
-
-    if (!empCode) {
-      return res.status(400).json({ error: "Employee Code is required" });
-    }
-
-    const queryYear = req.query.year
-      ? parseInt(req.query.year as string)
-      : new Date().getFullYear();
-    const queryMonth = req.query.month
-      ? parseInt(req.query.month as string)
-      : null;
-
-    let whereCondition: any = {
-      empCode: empCode,
-      year: queryYear,
-    };
-
-    if (queryMonth) {
-      whereCondition.month = queryMonth;
-    }
-
-    const attendanceDates = await prisma.attendanceDate.findMany({
-      where: whereCondition,
-      orderBy: {
-        date: "asc",
-      },
-      include: {
-        attendance: {
-          select: {
-            takenLocation: true,
-            checkInTime: true,
-            checkOutTime: true,
-            sessionType: true,
-            attendanceType: true,
-            isCheckedOut: true,
-            latitude: true,
-            longitude: true,
-          },
-        },
-      },
-    });
-
-    // Calculate statistics - count not checked out as present with 0.5 weight
-    const totalFullDays = attendanceDates.filter(
-      (d) => d.attendanceType === AttendanceType.FULL_DAY
-    ).length;
-    const totalHalfDays = attendanceDates.filter(
-      (d) => d.attendanceType === AttendanceType.HALF_DAY
-    ).length;
-    const notCheckedOut = attendanceDates.filter(
-      (d) => d.attendance && !d.attendance.isCheckedOut
-    ).length;
-
-    // Count not checked out as half day for statistics
-    const totalDays = totalFullDays + (totalHalfDays + notCheckedOut) * 0.5;
-
-    const currentStreak = calculateCurrentStreak(attendanceDates);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        dates: attendanceDates,
-        statistics: {
-          totalDays,
-          totalFullDays,
-          totalHalfDays,
-          notCheckedOut,
-          currentStreak,
-          longestStreak: currentStreak,
-          lastAttendance:
-            attendanceDates.length > 0
-              ? attendanceDates[attendanceDates.length - 1]!.date
-              : null,
-        },
-      },
-    });
-  } catch (error: any) {
-    console.error("Get attendance calendar error:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-// Get today's attendance for a user
 export const getTodayAttendance = async (req: Request, res: Response) => {
   try {
     const { username } = req.params;
@@ -468,16 +405,19 @@ export const getTodayAttendance = async (req: Request, res: Response) => {
       Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
     );
 
-    const attendance = await prisma.attendance.findUnique({
+    const attendance = await prisma.attendance.findFirst({
       where: {
-        empCode_date: {
-          empCode: user.empCode,
-          date: localDate,
-        },
+        employeeNumber: user.employeeNumber,
+        attendanceCalendar: {
+          day: localDate
+        }
       },
       include: {
         photos: true,
         audio: true,
+        attendanceType: true,
+        attendanceCalendar: true,
+        locationAttendance: true
       },
     });
 
@@ -498,486 +438,197 @@ export const getTodayAttendance = async (req: Request, res: Response) => {
   }
 };
 
-// Helper function to calculate week of year
-function getWeekOfYear(date: Date): number {
-  const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
-  const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
-  return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
-}
+export const getUserAttendanceCalendar = async (req: Request, res: Response) => {
+  try {
+    const { employeeNumber } = req.params;
+    const { year, month } = req.query;
 
-// Helper function to calculate current streak
-function calculateCurrentStreak(attendanceDates: any[]): number {
-  if (attendanceDates.length === 0) return 0;
-
-  let streak = 0;
-  const sortedDates = attendanceDates.sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-  );
-
-  for (let i = 0; i < sortedDates.length; i++) {
-    // Count full days as 1, half days as 0.5, not checked out as 0.5
-    if (sortedDates[i].attendanceType === AttendanceType.FULL_DAY) {
-      streak += 1;
-    } else if (sortedDates[i].attendanceType === AttendanceType.HALF_DAY) {
-      streak += 0.5;
-    } else if (
-      sortedDates[i].attendance &&
-      !sortedDates[i].attendance.isCheckedOut
-    ) {
-      streak += 0.5; // Count not checked out as half day
+    if (!employeeNumber) {
+      return res.status(400).json({ error: "Employee Number is required" });
     }
 
-    // Check if streak continues
-    if (i < sortedDates.length - 1) {
-      const prevDate = new Date(sortedDates[i].date);
-      const currDate = new Date(sortedDates[i + 1].date);
-      const dayDiff = Math.floor(
-        (prevDate.getTime() - currDate.getTime()) / (1000 * 60 * 60 * 24)
-      );
+    const queryYear = year ? parseInt(year as string) : new Date().getFullYear();
+    const queryMonth = month ? parseInt(month as string) : null;
 
-      if (dayDiff !== 1) {
-        break; // Streak broken
+    let whereCondition: any = {
+      employeeNumber: employeeNumber,
+    };
+
+    if (queryMonth) {
+      const startDate = new Date(queryYear, queryMonth - 1, 1);
+      const endDate = new Date(queryYear, queryMonth, 0);
+      
+      whereCondition.attendanceCalendar = {
+        day: {
+          gte: startDate,
+          lte: endDate
+        }
+      };
+    } else {
+      const startDate = new Date(queryYear, 0, 1);
+      const endDate = new Date(queryYear, 11, 31);
+      
+      whereCondition.attendanceCalendar = {
+        day: {
+          gte: startDate,
+          lte: endDate
+        }
+      };
+    }
+
+    const attendances = await prisma.attendance.findMany({
+      where: whereCondition,
+      include: {
+        attendanceCalendar: true,
+        attendanceType: true,
+        locationAttendance: true
+      },
+      orderBy: {
+        attendanceCalendar: {
+          day: 'asc'
+        }
       }
-    }
-  }
-
-  return streak;
-}
-
-// Helper function to update attendance calendar
-async function updateAttendanceCalendar(
-  tx: any,
-  empCode: string,
-  attendanceDate: Date,
-  attendanceType: AttendanceType
-) {
-  const year = attendanceDate.getFullYear();
-  const month = attendanceDate.getMonth() + 1;
-  const day = attendanceDate.getDate();
-
-  let calendar = await tx.attendanceCalendar.findUnique({
-    where: {
-      empCode_year_month: {
-        empCode,
-        year,
-        month,
-      },
-    },
-  });
-
-  if (!calendar) {
-    // Create new calendar entry
-    const daysMask = "0".repeat(31);
-    const maskValue = attendanceType === AttendanceType.FULL_DAY ? "2" : "1";
-    const newMask =
-      daysMask.substring(0, day - 1) + maskValue + daysMask.substring(day);
-
-    await tx.attendanceCalendar.create({
-      data: {
-        empCode,
-        year,
-        month,
-        daysMask: newMask,
-        totalFullDays: attendanceType === AttendanceType.FULL_DAY ? 1 : 0,
-        totalHalfDays: attendanceType === AttendanceType.HALF_DAY ? 1 : 0,
-      },
     });
-  } else {
-    // Update existing calendar entry
-    const daysMask = calendar.daysMask.padEnd(31, "0");
-    const maskValue = attendanceType === AttendanceType.FULL_DAY ? "2" : "1";
-    const newMask =
-      daysMask.substring(0, day - 1) + maskValue + daysMask.substring(day);
 
-    // Count full and half days
-    const fullDays = (newMask.match(/2/g) || []).length;
-    const halfDays = (newMask.match(/1/g) || []).length;
+    // Calculate statistics
+    const totalFullDays = attendances.filter(a => a.attendanceType?.fullDay).length;
+    const totalHalfDays = attendances.filter(a => a.attendanceType?.halfDay).length;
+    const notCheckedOut = attendances.filter(a => !a.attendanceType?.isCheckout).length;
+    const totalDays = totalFullDays + (totalHalfDays * 0.5) + (notCheckedOut * 0.5);
 
-    await tx.attendanceCalendar.update({
-      where: {
-        empCode_year_month: {
-          empCode,
-          year,
-          month,
-        },
-      },
+    res.status(200).json({
+      success: true,
       data: {
-        daysMask: newMask,
-        totalFullDays: fullDays,
-        totalHalfDays: halfDays,
-      },
+        attendances,
+        statistics: {
+          totalDays,
+          totalFullDays,
+          totalHalfDays,
+          notCheckedOut,
+          year: queryYear,
+          month: queryMonth
+        }
+      }
     });
+  } catch (error: any) {
+    console.error("Get user attendance calendar error:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
-}
+};
 
-// Admin: Get all users with attendance including session and day type
-export const getAllUsersWithAttendance = async (
-  req: Request,
-  res: Response
-) => {
+export const getAllUsersWithAttendance = async (req: Request, res: Response) => {
   try {
     const { month, year } = req.query;
 
-    const queryMonth = month
-      ? parseInt(month as string)
-      : new Date().getMonth() + 1;
-    const queryYear = year
-      ? parseInt(year as string)
-      : new Date().getFullYear();
+    const queryMonth = month ? parseInt(month as string) : new Date().getMonth() + 1;
+    const queryYear = year ? parseInt(year as string) : new Date().getFullYear();
+
+    const startDate = new Date(queryYear, queryMonth - 1, 1);
+    const endDate = new Date(queryYear, queryMonth, 0);
 
     const users = await prisma.user.findMany({
-      where: {
-        role: "USER",
-      },
       select: {
-        userKey: true,
-        empCode: true,
+        employeeNumber: true,
         username: true,
-        email: true,
-        location: true,
-        isActive: true,
-        createdAt: true,
-        userLocation: {
-          select: {
-            locationType: true,
-            updatedAt: true,
-            fieldTrips: {
-              where: {
-                isActive: true,
-              },
-              orderBy: {
-                startDate: "asc",
-              },
-            },
-          },
+        empClass: true,
+        dateOfResign: true,
+        userProjects: {
+          include: {
+            project: true
+          }
         },
         attendances: {
           where: {
-            date: {
-              gte: new Date(queryYear, queryMonth - 1, 1),
-              lt: new Date(queryYear, queryMonth, 1),
-            },
+            attendanceCalendar: {
+              day: {
+                gte: startDate,
+                lte: endDate
+              }
+            }
           },
           include: {
+            attendanceCalendar: true,
+            attendanceType: true,
+            locationAttendance: true,
             photos: true,
-            audio: true,
+            audio: true
           },
           orderBy: {
-            date: "desc",
-          },
+            attendanceCalendar: {
+              day: 'desc'
+            }
+          }
         },
+        fieldTrips: {
+          where: {
+            isActive: true
+          }
+        }
       },
       orderBy: {
-        username: "asc",
-      },
+        username: 'asc'
+      }
     });
 
-    // Calculate attendance statistics for each user
-    const formattedUsers = await Promise.all(
-      users.map(async (user) => {
-        const fullDays = user.attendances.filter(
-          (a) => a.attendanceType === "FULL_DAY"
-        ).length;
-        const halfDays = user.attendances.filter(
-          (a) => a.attendanceType === "HALF_DAY"
-        ).length;
-        const notCheckedOut = user.attendances.filter(
-          (a) => !a.isCheckedOut
-        ).length;
-        const totalDays = fullDays + (halfDays + notCheckedOut) * 0.5;
+    // Format users with statistics
+    const formattedUsers = users.map(user => {
+      const fullDays = user.attendances.filter(a => a.attendanceType?.fullDay).length;
+      const halfDays = user.attendances.filter(a => a.attendanceType?.halfDay).length;
+      const notCheckedOut = user.attendances.filter(a => !a.attendanceType?.isCheckout).length;
+      const totalDays = fullDays + (halfDays * 0.5) + (notCheckedOut * 0.5);
 
-        return {
-          id: user.userKey,
-          empCode: user.empCode,
-          username: user.username,
-          email: user.email,
-          department: user.location,
-          isActive: user.isActive,
-          locationType: user.userLocation?.locationType || "ABSOLUTE",
-          fieldTrips: user.userLocation?.fieldTrips || [],
-          monthlyStatistics: {
-            totalDays,
-            fullDays,
-            halfDays,
-            notCheckedOut,
+      return {
+        employeeNumber: user.employeeNumber,
+        username: user.username,
+        empClass: user.empClass,
+        projects: user.userProjects.map(up => ({
+          projectCode: up.projectCode,
+          department: up.project.department
+        })),
+        hasActiveFieldTrip: user.fieldTrips.length > 0,
+        monthlyStatistics: {
+          totalDays,
+          fullDays,
+          halfDays,
+          notCheckedOut
+        },
+        attendances: user.attendances.map(att => ({
+          date: att.attendanceCalendar?.day,
+          checkinTime: att.attendanceType?.checkinTime,
+          checkoutTime: att.attendanceType?.checkoutTime,
+          sessionType: att.attendanceType?.attendanceGivenTime,
+          isFullDay: att.attendanceType?.fullDay,
+          isHalfDay: att.attendanceType?.halfDay,
+          isCheckedOut: att.attendanceType?.isCheckout,
+          location: {
+            takenLocation: att.attendanceType?.takenLocation,
+            latitude: att.locationAttendance?.latitude,
+            longitude: att.locationAttendance?.longitude,
+            county: att.locationAttendance?.county,
+            state: att.locationAttendance?.state,
+            postcode: att.locationAttendance?.postcode
           },
-          attendances: user.attendances.map((att) => ({
-            date: att.date,
-            checkInTime: att.checkInTime,
-            checkOutTime: att.checkOutTime,
-            sessionType: att.sessionType,
-            attendanceType: att.attendanceType,
-            isCheckedOut: att.isCheckedOut,
-            location: att.takenLocation,
-            latitude: att.latitude,
-            longitude: att.longitude,
-            photos: att.photos.map((p) => ({
-              url: p.photoUrl,
-              type: p.photoType,
-            })),
-            audio: att.audio.map((a) => ({
-              url: a.audioUrl,
-              duration: a.duration,
-            })),
+          photos: att.photos.map(p => ({
+            url: p.photoUrl,
+            type: p.photoType
           })),
-        };
-      })
-    );
+          audio: att.audio.map(a => ({
+            url: a.audioUrl,
+            duration: a.duration
+          }))
+        }))
+      };
+    });
 
     res.status(200).json({
       success: true,
       month: queryMonth,
       year: queryYear,
       totalUsers: formattedUsers.length,
-      data: formattedUsers,
+      data: formattedUsers
     });
   } catch (error: any) {
     console.error("Get all users error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
-
-export const getUserAttendanceSummary = async (req: Request, res: Response) => {
-  try {
-    const { empCode } = req.params;
-
-    if (!empCode) {
-      return res.status(400).json({ error: "Employee Code is required" });
-    }
-
-    const user = await prisma.user.findFirst({
-      where: { empCode: empCode },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const currentYear = new Date().getFullYear();
-    const currentMonth = new Date().getMonth() + 1;
-
-    // Get current month attendance
-    const currentMonthAttendances = await prisma.attendanceDate.findMany({
-      where: {
-        empCode: empCode,
-        year: currentYear,
-        month: currentMonth,
-      },
-      include: {
-        attendance: {
-          select: {
-            sessionType: true,
-            attendanceType: true,
-            isCheckedOut: true,
-            checkInTime: true,
-            checkOutTime: true,
-          },
-        },
-      },
-      orderBy: {
-        date: "desc",
-      },
-    });
-
-    // Get year-to-date statistics
-    const yearToDateAttendances = await prisma.attendanceDate.findMany({
-      where: {
-        empCode: empCode,
-        year: currentYear,
-      },
-    });
-
-    const currentMonthStats = {
-      totalDays:
-        currentMonthAttendances.filter((a) => a.attendanceType === "FULL_DAY")
-          .length +
-        currentMonthAttendances.filter((a) => a.attendanceType === "HALF_DAY")
-          .length *
-          0.5 +
-        currentMonthAttendances.filter(
-          (a) => a.attendance && !a.attendance.isCheckedOut
-        ).length *
-          0.5,
-      fullDays: currentMonthAttendances.filter(
-        (a) => a.attendanceType === "FULL_DAY"
-      ).length,
-      halfDays: currentMonthAttendances.filter(
-        (a) => a.attendanceType === "HALF_DAY"
-      ).length,
-      notCheckedOut: currentMonthAttendances.filter(
-        (a) => a.attendance && !a.attendance.isCheckedOut
-      ).length,
-      presentDays: currentMonthAttendances.length,
-    };
-
-    const yearToDateStats = {
-      totalDays:
-        yearToDateAttendances.filter((a) => a.attendanceType === "FULL_DAY")
-          .length +
-        yearToDateAttendances.filter((a) => a.attendanceType === "HALF_DAY")
-          .length *
-          0.5,
-      fullDays: yearToDateAttendances.filter(
-        (a) => a.attendanceType === "FULL_DAY"
-      ).length,
-      halfDays: yearToDateAttendances.filter(
-        (a) => a.attendanceType === "HALF_DAY"
-      ).length,
-      presentDays: yearToDateAttendances.length,
-    };
-
-    res.status(200).json({
-      success: true,
-      data: {
-        user: {
-          empCode: user.empCode,
-          username: user.username,
-          email: user.email,
-        },
-        currentMonth: {
-          month: currentMonth,
-          year: currentYear,
-          statistics: currentMonthStats,
-          recentAttendances: currentMonthAttendances.slice(0, 10), // Last 10 days
-        },
-        yearToDate: {
-          year: currentYear,
-          statistics: yearToDateStats,
-        },
-      },
-    });
-  } catch (error: any) {
-    console.error("Get user attendance summary error:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-export const getUserAttendanceDetails = async (req: Request, res: Response) => {
-  try {
-    const { empCode } = req.params;
-    const { year, month } = req.query;
-
-    if (!empCode) {
-      return res.status(400).json({ error: "Employee Code is required" });
-    }
-
-    const user = await prisma.user.findFirst({
-      where: { empCode: empCode },
-      include: {
-        userLocation: true,
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const queryYear = year
-      ? parseInt(year as string)
-      : new Date().getFullYear();
-    const queryMonth = month
-      ? parseInt(month as string)
-      : new Date().getMonth() + 1;
-
-    const attendances = await prisma.attendance.findMany({
-      where: {
-        empCode: empCode,
-        date: {
-          gte: new Date(queryYear, queryMonth - 1, 1),
-          lt: new Date(queryYear, queryMonth, 1),
-        },
-      },
-      include: {
-        photos: true,
-        audio: true,
-        attendanceDate: true,
-      },
-      orderBy: {
-        date: "desc",
-      },
-    });
-
-    // Calculate statistics
-    const fullDays = attendances.filter(
-      (a) => a.attendanceType === "FULL_DAY"
-    ).length;
-    const halfDays = attendances.filter(
-      (a) => a.attendanceType === "HALF_DAY"
-    ).length;
-    const notCheckedOut = attendances.filter((a) => !a.isCheckedOut).length;
-    const totalDays = fullDays + (halfDays + notCheckedOut) * 0.5;
-
-    const statistics = {
-      totalDays,
-      fullDays,
-      halfDays,
-      notCheckedOut,
-      presentDays: attendances.length,
-      workingDaysInMonth: getWorkingDaysInMonth(queryYear, queryMonth),
-      attendancePercentage:
-        attendances.length > 0
-          ? (totalDays / getWorkingDaysInMonth(queryYear, queryMonth)) * 100
-          : 0,
-    };
-
-    res.status(200).json({
-      success: true,
-      data: {
-        user: {
-          empCode: user.empCode,
-          username: user.username,
-          email: user.email,
-          location: user.location,
-          locationType: user.userLocation?.locationType || "ABSOLUTE",
-        },
-        period: {
-          year: queryYear,
-          month: queryMonth,
-        },
-        statistics,
-        attendances: attendances.map((att) => ({
-          id: att.attendanceKey,
-          date: att.date,
-          checkInTime: att.checkInTime,
-          checkOutTime: att.checkOutTime,
-          sessionType: att.sessionType,
-          attendanceType: att.attendanceType,
-          isCheckedOut: att.isCheckedOut,
-          location: att.takenLocation,
-          latitude: att.latitude,
-          longitude: att.longitude,
-          photos: att.photos.map((p) => ({
-            id: p.photoKey,
-            url: p.photoUrl,
-            type: p.photoType,
-          })),
-          audio: att.audio.map((a) => ({
-            id: a.audioKey,
-            url: a.audioUrl,
-            duration: a.duration,
-          })),
-        })),
-      },
-    });
-  } catch (error: any) {
-    console.error("Get user attendance details error:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-// Helper function to calculate working days in a month (excluding weekends)
-function getWorkingDaysInMonth(year: number, month: number): number {
-  const lastDay = new Date(year, month, 0).getDate();
-  let workingDays = 0;
-
-  for (let day = 1; day <= lastDay; day++) {
-    const date = new Date(year, month - 1, day);
-    const dayOfWeek = date.getDay();
-    // Exclude Sundays (0) and Saturdays (6) - adjust based on your working days
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      workingDays++;
-    }
-  }
-
-  return workingDays;
-}

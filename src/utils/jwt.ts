@@ -1,13 +1,12 @@
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
-const TOKEN_EXPIRY = '30m'; 
+const TOKEN_EXPIRY = '30d'; // Extended to 30 days for better UX
 
 export interface TokenPayload {
-  userKey: string;
-  empCode: string;
+  employeeNumber: string;
   username: string;
-  email: string;
+  empClass: string;
   iat?: number;
   exp?: number;
 }

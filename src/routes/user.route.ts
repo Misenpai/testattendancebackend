@@ -1,10 +1,11 @@
-
+// user.route.ts
 import { Router } from 'express';
-import { createUser, loginUser } from '../controllers/user.controller.js';
+import { loginUser, getUserById } from '../controllers/user.controller.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
 
-router.post('/signup', createUser);
 router.post('/login', loginUser);
+router.get('/user/:employeeNumber', authenticateToken, getUserById);
 
 export default router;
