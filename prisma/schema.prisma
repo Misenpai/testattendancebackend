@@ -14,10 +14,10 @@ datasource db {
 
 // Enums
 enum LocationType {
-  ABSOLUTE
-  APPROX
-  FIELDTRIP
+  CAMPUS    // Inside IIT Guwahati campus
+  FIELDTRIP // Outside campus for field trips
 }
+
 
 enum AttendanceSession {
   FN  // Forenoon
@@ -111,7 +111,7 @@ model Attendance {
   employeeNumber      String       @db.VarChar(255)
   username            String       @db.VarChar(255)
   attendanceGiven     Boolean      @default(false)
-  locationType        LocationType @default(APPROX)
+  locationType        LocationType @default(CAMPUS)
 
   // Relations
   user               User                 @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)

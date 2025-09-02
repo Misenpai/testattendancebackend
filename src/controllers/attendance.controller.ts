@@ -61,7 +61,7 @@ export const createAttendance = async (req: Request, res: Response) => {
       audioDuration,
       latitude,
       longitude,
-      locationType = LocationType.APPROX
+      locationType = LocationType.CAMPUS,
     } = req.body;
 
     if (!username || username === "undefined") {
@@ -86,9 +86,9 @@ export const createAttendance = async (req: Request, res: Response) => {
             isActive: true,
             startDate: { lte: new Date() },
             endDate: { gte: new Date() },
-          }
-        }
-      }
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -97,7 +97,9 @@ export const createAttendance = async (req: Request, res: Response) => {
 
     // Check if user is on field trip
     const isOnFieldTrip = user.fieldTrips.length > 0;
-    const finalLocationType = isOnFieldTrip ? LocationType.FIELDTRIP : locationType;
+    const finalLocationType = isOnFieldTrip
+      ? LocationType.FIELDTRIP
+      : locationType;
 
     const currentTime = new Date();
     const sessionType = getSessionType(currentTime);
@@ -112,13 +114,9 @@ export const createAttendance = async (req: Request, res: Response) => {
     const existingAttendance = await prisma.attendance.findFirst({
       where: {
         employeeNumber: user.employeeNumber,
-        attendanceCalendar: {
-          day: localDate
-        }
+        attendanceCalendar: { day: localDate },
       },
-      include: {
-        attendanceType: true
-      }
+      include: { attendanceType: true },
     });
 
     if (existingAttendance && existingAttendance.attendanceType?.isCheckout) {
@@ -169,7 +167,7 @@ export const createAttendance = async (req: Request, res: Response) => {
     const attendance = await prisma.$transaction(async (tx) => {
       if (existingAttendance && !existingAttendance.attendanceType?.isCheckout) {
         // Re-checkin → update existing record
-        const updatedAttendance = await tx.attendance.update({
+        return tx.attendance.update({
           where: { attendanceRecordKey: existingAttendance.attendanceRecordKey },
           data: {
             locationType: finalLocationType,
@@ -177,8 +175,8 @@ export const createAttendance = async (req: Request, res: Response) => {
               update: {
                 checkinTime: currentTime,
                 attendanceGivenTime: sessionType,
-                takenLocation
-              }
+                takenLocation,
+              },
             },
             locationAttendance: {
               upsert: {
@@ -187,16 +185,16 @@ export const createAttendance = async (req: Request, res: Response) => {
                   longitude: lng,
                   county: locationDetails.county,
                   state: locationDetails.state,
-                  postcode: locationDetails.postcode
+                  postcode: locationDetails.postcode,
                 },
                 update: {
                   latitude: lat,
                   longitude: lng,
                   county: locationDetails.county,
                   state: locationDetails.state,
-                  postcode: locationDetails.postcode
-                }
-              }
+                  postcode: locationDetails.postcode,
+                },
+              },
             },
             photos: {
               deleteMany: {},
@@ -209,19 +207,18 @@ export const createAttendance = async (req: Request, res: Response) => {
               },
             }),
           },
-          include: { 
-            photos: true, 
+          include: {
+            photos: true,
             audio: true,
             attendanceType: true,
             locationAttendance: true,
-            attendanceCalendar: true
+            attendanceCalendar: true,
           },
         });
-        return updatedAttendance;
       }
 
       // First check-in of the day → create new attendance
-      const newAttendance = await tx.attendance.create({
+      return tx.attendance.create({
         data: {
           employeeNumber: user.employeeNumber,
           username: user.username,
@@ -231,8 +228,8 @@ export const createAttendance = async (req: Request, res: Response) => {
             create: {
               day: localDate,
               present: 1,
-              absent: 0
-            }
+              absent: 0,
+            },
           },
           attendanceType: {
             create: {
@@ -241,8 +238,8 @@ export const createAttendance = async (req: Request, res: Response) => {
               isCheckout: false,
               attendanceGivenTime: sessionType,
               checkinTime: currentTime,
-              takenLocation
-            }
+              takenLocation,
+            },
           },
           locationAttendance: {
             create: {
@@ -250,26 +247,22 @@ export const createAttendance = async (req: Request, res: Response) => {
               longitude: lng,
               county: locationDetails.county,
               state: locationDetails.state,
-              postcode: locationDetails.postcode
-            }
+              postcode: locationDetails.postcode,
+            },
           },
           photos: { create: photoData },
           ...(audioUrl && {
-            audio: {
-              create: [{ audioUrl, duration: parsedAudioDuration }],
-            },
+            audio: { create: [{ audioUrl, duration: parsedAudioDuration }] },
           }),
         },
-        include: { 
-          photos: true, 
+        include: {
+          photos: true,
           audio: true,
           attendanceType: true,
           locationAttendance: true,
-          attendanceCalendar: true
+          attendanceCalendar: true,
         },
       });
-
-      return newAttendance;
     });
 
     res.status(201).json({
