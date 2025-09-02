@@ -198,7 +198,7 @@ export const seedBasicCalendar = async () => {
       const daysInMonth = new Date(currentYear, month + 1, 0).getDate();
       
       for (let day = 1; day <= daysInMonth; day++) {
-        const date = new Date(currentYear, month, day);
+        const date = new Date(Date.UTC(currentYear, month, day, 12));
         const dayOfWeek = date.getDay();
         
         

@@ -7,6 +7,8 @@ import { connectDB } from './config/db.js';
 import attendanceRoutes from './routes/attendance.route.js';
 import userRoutes from './routes/user.route.js';
 import calendarRoutes from './routes/calendar.route.js';
+import locationRoutes from "./routes/userLocation.route.js";
+import profileRoute from "./routes/profile.route.js"
 import os from 'os';
 
 dotenv.config();
@@ -44,6 +46,8 @@ app.get('/health', (req, res) => {
 app.use('/api', userRoutes);
 app.use('/api', attendanceRoutes);
 app.use('/api', calendarRoutes);
+app.use('/api', locationRoutes)
+app.use('/api', profileRoute)
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
@@ -91,8 +95,6 @@ async function startServer() {
       console.log('\n📆 Calendar:');
       console.log(`  GET  http://${localIP}:${PORT}/api/calendar`);
       console.log(`  GET  http://${localIP}:${PORT}/api/calendar/holidays`);
-      console.log(`  GET  http://${localIP}:${PORT}/api/calendar/working-days`);
-      console.log(`  POST http://${localIP}:${PORT}/api/calendar/holiday`);
       
       console.log('\n🔧 Admin:');
       console.log(`  GET  http://${localIP}:${PORT}/api/admin/users-attendance`);

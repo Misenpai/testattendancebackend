@@ -194,12 +194,28 @@ export const getUserFieldTripsByUsername = async (req: Request, res: Response) =
       });
     }
 
+    // Check if user is currently on a field trip
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const isOnFieldTrip = user.fieldTrips.some(trip => {
+      const start = new Date(trip.startDate);
+      const end = new Date(trip.endDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      return today >= start && today <= end && trip.isActive;
+    });
+
+    // Determine location type - if on field trip, use FIELDTRIP, otherwise default to ABSOLUTE
+    const locationType = isOnFieldTrip ? "FIELDTRIP" : "ABSOLUTE";
+
     res.status(200).json({
       success: true,
       data: {
         employeeNumber: user.employeeNumber,
         username: user.username,
         empClass: user.empClass,
+        locationType: locationType, // Add this field
         fieldTrips: user.fieldTrips || []
       },
     });

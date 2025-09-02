@@ -39,7 +39,7 @@ const holidays = [
   { date: new Date('2025-12-25'), description: 'Christmas' },
 ];
 
-const seedIndianHolidays = async () => {
+const seedHolidays = async () => {
   try {
     console.log('🎉 Adding Indian holidays for 2025...');
     
@@ -74,4 +74,4 @@ const seedIndianHolidays = async () => {
   }
 };
 
-seedIndianHolidays();
+seedHolidays();
