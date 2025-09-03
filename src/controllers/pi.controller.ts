@@ -131,7 +131,7 @@ export const getPIUsersAttendance = async (req: Request, res: Response) => {
           include: {
             attendanceCalendar: true,
             attendanceType: true,
-            locationAttendance: true,
+            locationAttendance: true, // Include location attendance
             photos: true,
             audio: true
           },
@@ -152,7 +152,7 @@ export const getPIUsersAttendance = async (req: Request, res: Response) => {
       }
     });
 
-    // Format response
+    // Format response with location details
     const formattedUsers = users.map(user => {
       const fullDays = user.attendances.filter(a => a.attendanceType?.fullDay).length;
       const halfDays = user.attendances.filter(a => a.attendanceType?.halfDay).length;
@@ -183,6 +183,17 @@ export const getPIUsersAttendance = async (req: Request, res: Response) => {
           isHalfDay: att.attendanceType?.halfDay,
           isCheckedOut: att.attendanceType?.isCheckout,
           takenLocation: att.attendanceType?.takenLocation,
+          location: {
+            takenLocation: att.attendanceType?.takenLocation,
+            latitude: att.locationAttendance?.latitude,
+            longitude: att.locationAttendance?.longitude,
+            county: att.locationAttendance?.county, // Include county
+            state: att.locationAttendance?.state,
+            postcode: att.locationAttendance?.postcode, // Include pincode
+            address: att.locationAttendance ? 
+              `${att.locationAttendance.county || ''}, ${att.locationAttendance.state || ''}, ${att.locationAttendance.postcode || ''}`.replace(/^, |, , |, $/g, '').trim() 
+              : null
+          },
           photos: att.photos.map(p => ({
             url: p.photoUrl,
             type: p.photoType
