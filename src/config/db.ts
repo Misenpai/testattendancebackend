@@ -235,6 +235,93 @@ export const seedBasicCalendar = async () => {
   }
 };
 
+export const seedPIData = async () => {
+  try {
+    const projectCodes = [
+      'J4E89B2F', // Dept1
+      'H9A53C7D', // Dept1  
+      'G2D71E5A', // Dept2
+      'F6C28A4B', // Dept2
+      'A9F41C3E', // Dept3
+      'B7E82A9D', // Dept3
+      'C3D15F6B', // Dept4
+      'D8A94E2C', // Dept4
+      'E1B37D9F', // Dept5
+      'K7D12F6A', // Dept5
+    ];
+
+    // Create only 3 PIs with their primary projects
+    const piData = [
+      { username: 'PIUser1', password: '123456', projectCode: 'J4E89B2F' },
+      { username: 'PIUser2', password: '123456', projectCode: 'A9F41C3E' },
+      { username: 'PIUser3', password: '123456', projectCode: 'D8A94E2C' }
+    ];
+
+    // Create PIs
+    await prisma.pI.createMany({
+      data: piData,
+      skipDuplicates: true
+    });
+
+    console.log(`✅ Seeded ${piData.length} PIs successfully`);
+    
+    // Define project assignments for each PI
+    const piProjectAssignments = [
+      { username: 'PIUser1', projects: ['J4E89B2F', 'H9A53C7D', 'G2D71E5A', 'F6C28A4B'] },
+      { username: 'PIUser2', projects: ['A9F41C3E', 'B7E82A9D', 'C3D15F6B'] },
+      { username: 'PIUser3', projects: ['D8A94E2C', 'E1B37D9F', 'K7D12F6A'] }
+    ];
+
+    // Create PI-Project relations
+    const piProjectRelations = [];
+    for (const assignment of piProjectAssignments) {
+      const pi = await prisma.pI.findUnique({
+        where: { username: assignment.username }
+      });
+      
+      if (pi) {
+        for (const projectCode of assignment.projects) {
+          if (projectCode) { // Add check for projectCode
+            piProjectRelations.push({
+              principalInvestigatorKey: pi.principalInvestigatorKey,
+              projectCode: projectCode // This is now guaranteed to be string, not undefined
+            });
+          }
+        }
+      }
+    }
+
+    // Only create relations if we have valid data
+    if (piProjectRelations.length > 0) {
+      await prisma.pIProjectRelation.createMany({
+        data: piProjectRelations,
+        skipDuplicates: true
+      });
+
+      console.log(`✅ Created ${piProjectRelations.length} PI-Project relations successfully`);
+    }
+
+    // Log the distribution
+    console.log('PI-Project Distribution:');
+    piProjectAssignments.forEach(assignment => {
+      console.log(`  - ${assignment.username}: ${assignment.projects.length} projects (${assignment.projects.join(', ')})`);
+    });
+
+    return {
+      success: true,
+      message: `PIs and relations seeded successfully`,
+      count: piData.length
+    };
+  } catch (error) {
+    console.error('❌ Error seeding PIs:', error);
+    return {
+      success: false,
+      message: "Failed to seed PIs",
+      error: error instanceof Error ? error.message : error,
+    };
+  }
+};
+
 
 export const addHoliday = async (date: Date, description: string) => {
   try {

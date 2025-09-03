@@ -9,6 +9,7 @@ import userRoutes from './routes/user.route.js';
 import calendarRoutes from './routes/calendar.route.js';
 import locationRoutes from "./routes/userLocation.route.js";
 import profileRoute from "./routes/profile.route.js"
+import piRoute from "./routes/pi.routes.js"
 import os from 'os';
 
 dotenv.config();
@@ -48,6 +49,8 @@ app.use('/api', attendanceRoutes);
 app.use('/api', calendarRoutes);
 app.use('/api', locationRoutes)
 app.use('/api', profileRoute)
+app.use('/api', piRoute)
+
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
@@ -96,8 +99,11 @@ async function startServer() {
       console.log(`  GET  http://${localIP}:${PORT}/api/calendar`);
       console.log(`  GET  http://${localIP}:${PORT}/api/calendar/holidays`);
       
-      console.log('\n🔧 Admin:');
+      console.log('\n🔧 PI:');
       console.log(`  GET  http://${localIP}:${PORT}/api/admin/users-attendance`);
+      console.log(`  GET  http://${localIP}:${PORT}/api/admin/users-attendance`);
+      console.log(`  GET  http://${localIP}:${PORT}/api/admin/users-attendance`);
+
       console.log('================================\n');
     });
 
