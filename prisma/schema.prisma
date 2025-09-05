@@ -58,12 +58,10 @@ model Attendance {
   
   // Photo data (stored directly - one photo per attendance)
   photoUrl            String?      @db.VarChar(500)
-  photoUploadedAt     DateTime?
   
   // Audio data (stored directly - one audio per attendance)
   audioUrl            String?      @db.VarChar(500)
   audioDuration       Int?         // in seconds
-  audioUploadedAt     DateTime?
   
   // Location data (denormalized for performance)
   latitude            Float?       @db.Float
