@@ -4,7 +4,7 @@ const runPISeed = async () => {
   try {
     console.log('🔐 Starting PI seeding...');
 
-    // Connect to database
+    
     const connection = await connectDB();
     if (!connection.success) {
       throw new Error(connection.message);
@@ -12,7 +12,7 @@ const runPISeed = async () => {
 
     console.log('✅ Database connected successfully');
 
-    // Seed PIs
+    
     const result = await seedPIData();
     
     if (result.success) {

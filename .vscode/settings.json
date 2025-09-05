@@ -3,5 +3,6 @@
         "FIELDTRIP",
         "getiit",
         "testiit"
-    ]
+    ],
+    "prismaERDPreviewer.preferredTheme": "dark"
 }

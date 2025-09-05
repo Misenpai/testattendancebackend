@@ -43,7 +43,7 @@ const seedHolidays = async () => {
   try {
     console.log('🎉 Adding Indian holidays for 2025...');
     
-    // Connect to database
+    
     await connectDB();
     
     let successCount = 0;

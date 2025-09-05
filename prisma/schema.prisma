@@ -1,10 +1,7 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/prisma"
-    binaryTargets = ["native", "linux-musl", "linux-musl-openssl-3.0.x"]
+  binaryTargets = ["native", "linux-musl", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -12,68 +9,139 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Enums
-enum LocationType {
-  CAMPUS    // Inside IIT Guwahati campus
-  FIELDTRIP // Outside campus for field trips
-}
+// ============================================
+// CORE TABLES
+// ============================================
 
-
-enum AttendanceSession {
-  FN  // Forenoon
-  AF  // Afternoon
-}
-
-// User Table
 model User {
   employeeNumber    String    @id @db.VarChar(255)
   username          String    @unique @db.VarChar(255)
   empClass          String    @default("PJ") @db.VarChar(10)
-  dateOfResign      DateTime? @db.Date
-
+  
   // Relations
-  userProjects  UserProjectRelation[]
-  attendances   Attendance[]
-  fieldTrips    FieldTrip[]
+  userProjects      UserProjectRelation[]
+  attendances       Attendance[]
+  fieldTrips        FieldTrip[]
 
   @@map("users")
   @@index([username])
-  @@index([empClass])
 }
 
-// Project Table 
 model Project {
   projectCode   String   @id @db.VarChar(255)
   department    String   @db.VarChar(255)
 
   // Relations
-  userProjects UserProjectRelation[]
-  piProjects   PIProjectRelation[]
-  pis          PI[]
+  userProjects  UserProjectRelation[]
+  piProjects    PIProjectRelation[]
+  pis           PI[]
 
   @@map("projects")
   @@index([department])
 }
 
-// User-Project Relation Table
-model UserProjectRelation {
-  relationKey    String @id @default(cuid())
-  employeeNumber String @db.VarChar(255)
-  username       String @db.VarChar(255)
-  projectCode    String @db.VarChar(255)
+// ============================================
+// SINGLE ATTENDANCE TABLE - All data in one place
+// ============================================
 
+model Attendance {
+  // Composite primary key: employeeNumber + date
+  employeeNumber      String       @db.VarChar(255)
+  date                DateTime     @db.Date
+  
+  // Core attendance data
+  checkinTime         DateTime?
+  checkoutTime        DateTime?
+  sessionType         AttendanceSession?
+  attendanceType      AttendanceType?     // FULL_DAY, HALF_DAY
+  locationType        LocationType        @default(CAMPUS)
+  
+  // Photo data (stored directly - one photo per attendance)
+  photoUrl            String?      @db.VarChar(500)
+  photoUploadedAt     DateTime?
+  
+  // Audio data (stored directly - one audio per attendance)
+  audioUrl            String?      @db.VarChar(500)
+  audioDuration       Int?         // in seconds
+  audioUploadedAt     DateTime?
+  
+  // Location data (denormalized for performance)
+  latitude            Float?       @db.Float
+  longitude           Float?       @db.Float
+  locationAddress     String?      @db.VarChar(500)  // Full address as string
+  county              String?      @db.VarChar(255)
+  state               String?      @db.VarChar(255)
+  postcode            String?      @db.VarChar(20)
+  
   // Relations
-  user    User    @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
-  project Project @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+  user                User         @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
 
-  @@map("user_project_relations")
-  @@unique([employeeNumber, projectCode])
+  @@id([employeeNumber, date])  // Composite primary key
+  @@map("attendances")
+  @@index([date])
   @@index([employeeNumber])
-  @@index([projectCode])
-  @@index([username])
+  @@index([employeeNumber, date])
 }
 
-// PI Table
+// ============================================
+// CALENDAR & HOLIDAYS
+// ============================================
+
+model Calendar {
+  date          DateTime  @id @db.Date
+  isHoliday     Boolean   @default(false)
+  isWeekend     Boolean   @default(false)
+  description   String?   @db.VarChar(255)
+  
+  @@map("calendar")
+  @@index([date])
+  @@index([isHoliday])
+}
+
+// ============================================
+// FIELD TRIPS (Simplified)
+// ============================================
+
+model FieldTrip {
+  fieldTripKey     String    @id @default(cuid())
+  employeeNumber   String    @db.VarChar(255)
+  startDate        DateTime  @db.Date
+  endDate          DateTime  @db.Date
+  description      String?   @db.Text
+  isActive         Boolean   @default(true)
+  createdBy        String    @db.VarChar(255)
+
+  // Relations
+  user             User      @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
+
+  @@map("field_trips")
+  @@index([employeeNumber])
+  @@index([startDate, endDate])
+  @@index([employeeNumber, startDate, endDate])
+}
+
+// ============================================
+// USER-PROJECT RELATIONS
+// ============================================
+
+model UserProjectRelation {
+  employeeNumber    String    @db.VarChar(255)
+  projectCode       String    @db.VarChar(255)
+  
+  // Relations
+  user              User      @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
+  project           Project   @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+
+  @@id([employeeNumber, projectCode])
+  @@map("user_project_relations")
+  @@index([employeeNumber])
+  @@index([projectCode])
+}
+
+// ============================================
+// PI TABLES (Principal Investigators)
+// ============================================
+
 model PI {
   principalInvestigatorKey String  @id @default(cuid())
   username                 String  @unique @db.VarChar(255)
@@ -81,171 +149,42 @@ model PI {
   projectCode              String  @db.VarChar(255)
 
   // Relations
-  project    Project             @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
-  piProjects PIProjectRelation[]
+  project                  Project             @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+  piProjects               PIProjectRelation[]
 
   @@map("pis")
-  @@index([projectCode])
   @@index([username])
 }
 
-// PI-Project Relation Table
 model PIProjectRelation {
-  relationKey              String @id @default(cuid())
   principalInvestigatorKey String @db.VarChar(255)
   projectCode              String @db.VarChar(255)
 
   // Relations
-  pi      PI      @relation(fields: [principalInvestigatorKey], references: [principalInvestigatorKey], onDelete: Cascade)
-  project Project @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+  pi                       PI      @relation(fields: [principalInvestigatorKey], references: [principalInvestigatorKey], onDelete: Cascade)
+  project                  Project @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
 
+  @@id([principalInvestigatorKey, projectCode])
   @@map("pi_project_relations")
-  @@unique([principalInvestigatorKey, projectCode])
   @@index([principalInvestigatorKey])
   @@index([projectCode])
 }
 
-// Main Attendance Table
-model Attendance {
-  attendanceRecordKey String       @id @default(cuid())
-  employeeNumber      String       @db.VarChar(255)
-  username            String       @db.VarChar(255)
-  attendanceGiven     Boolean      @default(false)
-  locationType        LocationType @default(CAMPUS)
+// ============================================
+// ENUMS
+// ============================================
 
-  // Relations
-  user               User                 @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
-  attendanceCalendar AttendanceCalendar?
-  locationAttendance LocationAttendance?
-  attendanceType     AttendanceType?
-  photos             AttendancePhoto[]
-  audio              AttendanceAudio[]
-
-  @@map("attendances")
-  @@index([employeeNumber])
-  @@index([username])
-  @@index([attendanceGiven])
-  @@index([locationType])
+enum LocationType {
+  CAMPUS
+  FIELDTRIP
 }
 
-// Attendance Calendar Table - contains date of attendance
-model AttendanceCalendar {
-  calendarEntryKey    String   @id @default(cuid())
-  attendanceRecordKey String   @unique @db.VarChar(191)
-  day                 DateTime @db.Date
-  present             Int      @default(0) @db.TinyInt
-  absent              Int      @default(1) @db.TinyInt
-  
-  // Relations
-  attendance Attendance @relation(fields: [attendanceRecordKey], references: [attendanceRecordKey], onDelete: Cascade)
-
-  @@map("attendance_calendar")
-  @@index([day])
-  @@index([attendanceRecordKey])
-  @@index([present])
-  @@index([absent])
+enum AttendanceSession {
+  FN  // Forenoon
+  AF  // Afternoon
 }
 
-// Location Attendance Table - contains location data
-model LocationAttendance {
-  locationRecordKey   String   @id @default(cuid())
-  attendanceRecordKey String   @unique @db.VarChar(191)
-  latitude            Float?   @db.Float
-  longitude           Float?   @db.Float
-  county              String?  @db.VarChar(255)
-  state               String?  @db.VarChar(255)
-  postcode            String?  @db.VarChar(20)
-
-  // Relations
-  attendance Attendance @relation(fields: [attendanceRecordKey], references: [attendanceRecordKey], onDelete: Cascade)
-
-  @@map("location_attendances")
-  @@index([latitude, longitude])
-  @@index([attendanceRecordKey])
-}
-
-// Attendance Type Table - contains attendance details
-model AttendanceType {
-  attendanceTypeKey     String             @id @default(cuid())
-  attendanceRecordKey   String             @unique @db.VarChar(191)
-  halfDay               Boolean            @default(false)
-  fullDay               Boolean            @default(false)
-  isCheckout            Boolean            @default(false)
-  attendanceGivenTime   AttendanceSession? 
-  checkoutTime          DateTime?
-  checkinTime           DateTime?
-  takenLocation         String?            @db.VarChar(255)
-
-  // Relations
-  attendance Attendance @relation(fields: [attendanceRecordKey], references: [attendanceRecordKey], onDelete: Cascade)
-
-  @@map("attendance_types")
-  @@index([halfDay])
-  @@index([fullDay])
-  @@index([isCheckout])
-  @@index([attendanceGivenTime])
-  @@index([attendanceRecordKey])
-}
-
-// Calendar Table - contains holidays and weekends
-model Calendar {
-  calendarKey String   @id @default(cuid())
-  date        DateTime @unique @db.Date
-  description String?  @db.VarChar(255)
-  isHoliday   Boolean  @default(true)
-  isWeekend   Boolean  @default(false)
-
-  @@map("calendar")
-  @@index([date])
-  @@index([isHoliday])
-  @@index([isWeekend])
-}
-
-// Attendance Photos Table
-model AttendancePhoto {
-  photoRecordKey      String @id @default(cuid())
-  attendanceRecordKey String @db.VarChar(191)
-  photoUrl            String @db.VarChar(500)
-  photoType           String? @db.VarChar(50)
-
-  // Relations
-  attendance Attendance @relation(fields: [attendanceRecordKey], references: [attendanceRecordKey], onDelete: Cascade)
-
-  @@map("attendance_photos")
-  @@index([attendanceRecordKey])
-}
-
-// Attendance Audio Table
-model AttendanceAudio {
-  audioRecordKey      String @id @default(cuid())
-  attendanceRecordKey String @db.VarChar(191)
-  audioUrl            String @db.VarChar(500)
-  duration            Int?
-
-  // Relations
-  attendance Attendance @relation(fields: [attendanceRecordKey], references: [attendanceRecordKey], onDelete: Cascade)
-
-  @@map("attendance_audio")
-  @@index([attendanceRecordKey])
-}
-
-// Field Trip Table
-model FieldTrip {
-  fieldTripKey String   @id @default(cuid())
-  employeeNumber String @db.VarChar(255)
-  username     String   @db.VarChar(255)
-  startDate    DateTime @db.Date
-  endDate      DateTime @db.Date
-  description  String?  @db.Text
-  createdBy    String   @db.VarChar(255)
-  isActive     Boolean  @default(true)
-
-  // Relations
-  user User @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
-
-  @@map("field_trips")
-  @@index([employeeNumber])
-  @@index([username])
-  @@index([startDate, endDate])
-  @@index([isActive])
+enum AttendanceType {
+  FULL_DAY
+  HALF_DAY
 }
