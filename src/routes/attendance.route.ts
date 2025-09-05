@@ -10,11 +10,10 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
 
-// Protected user routes
-router.post('/attendance', authenticateToken, upload.any(), createAttendance);
-router.post('/attendance/checkout', authenticateToken, checkoutAttendance);
-router.get('/attendance/today/:username', authenticateToken, getTodayAttendance);
-router.get('/attendance/calendar/:employeeNumber', authenticateToken, getUserAttendanceCalendar);
-
+// Mixed approach: attendance creation uses username (for files), other operations use employeeNumber
+router.post('/attendance', authenticateToken, upload.any(), createAttendance); // Uses username in body
+router.post('/attendance/checkout', authenticateToken, checkoutAttendance); // Uses employeeNumber in body
+router.get('/attendance/today/:employeeNumber', authenticateToken, getTodayAttendance); // Uses employeeNumber in URL
+router.get('/attendance/calendar/:employeeNumber', authenticateToken, getUserAttendanceCalendar); // Uses employeeNumber in URL
 
 export default router;

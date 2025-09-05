@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 
 export const loginUser = async (req: Request, res: Response) => {
   try {
-    const { username, password } = req.body;
+    const { username, password } = req.body; // Keep username for login
     
     if (!username || !password) {
       return res.status(400).json({ 
@@ -87,6 +87,7 @@ export const loginUser = async (req: Request, res: Response) => {
   }
 };
 
+// getUserById remains the same as it already uses employeeNumber
 export const getUserById = async (req: Request, res: Response) => {
   try {
     const { employeeNumber } = req.params;

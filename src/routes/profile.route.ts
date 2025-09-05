@@ -1,15 +1,15 @@
 // src/routes/profile.route.ts
 import { Router } from 'express';
 import { 
-  getUserProfileByUsername, 
+  getUserProfileByEmployeeNumber, 
   updateUserProfile
 } from '../controllers/profile.controller.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
 
-// All profile routes are protected
-router.get('/profile/username/:username', authenticateToken, getUserProfileByUsername);
-router.put('/profile/username/:username', authenticateToken, updateUserProfile);
+// Profile routes use employeeNumber
+router.get('/profile/:employeeNumber', authenticateToken, getUserProfileByEmployeeNumber);
+router.put('/profile/:employeeNumber', authenticateToken, updateUserProfile);
 
 export default router;

@@ -5,7 +5,7 @@ import axios from "axios";
 
 const prisma = new PrismaClient();
 
-// Helper function to get location details from coordinates
+// Helper functions remain the same...
 async function getLocationDetails(lat: number, lng: number) {
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`;
@@ -28,38 +28,30 @@ async function getLocationDetails(lat: number, lng: number) {
   }
 }
 
-// Helper function to determine session type based on time
 function getSessionType(time: Date): AttendanceSession {
   const hours = time.getHours();
   const minutes = time.getMinutes();
   const timeInMinutes = hours * 60 + minutes;
 
-  // Forenoon: 9:30 AM (570 mins) to 1:00 PM (780 mins)
   if (timeInMinutes >= 570 && timeInMinutes < 780) {
     return AttendanceSession.FN;
-  }
-  // Afternoon: 1:00 PM (780 mins) to 5:30 PM (1050 mins)
-  else if (timeInMinutes >= 780 && timeInMinutes <= 1050) {
+  } else if (timeInMinutes >= 780 && timeInMinutes <= 1050) {
     return AttendanceSession.AF;
   }
 
-  // If outside working hours, determine based on closest session
   if (timeInMinutes < 570) {
-    return AttendanceSession.FN; // Early morning counts as forenoon
+    return AttendanceSession.FN;
   }
-  return AttendanceSession.AF; // Late evening counts as afternoon
+  return AttendanceSession.AF;
 }
 
-// Helper function to determine attendance type
 function determineAttendanceType(checkinTime: Date, checkoutTime: Date | null, sessionType: AttendanceSession): AttendanceType | null {
   if (!checkoutTime) {
-    // If not checked out yet, we can't determine the type
     return null;
   }
   
   const hoursWorked = (checkoutTime.getTime() - checkinTime.getTime()) / (1000 * 60 * 60);
   
-  // Full day if checked in during FN and worked >= 6 hours
   if (sessionType === AttendanceSession.FN && hoursWorked >= 6) {
     return AttendanceType.FULL_DAY;
   }
@@ -67,7 +59,6 @@ function determineAttendanceType(checkinTime: Date, checkoutTime: Date | null, s
   return AttendanceType.HALF_DAY;
 }
 
-// Helper to get today's date normalized to midnight UTC
 function getTodayDate(): Date {
   const today = new Date();
   return new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
@@ -79,7 +70,7 @@ export const createAttendance = async (req: Request, res: Response) => {
     console.log("Received files:", req.files);
 
     const {
-      username,
+      username, // Keep username for attendance creation (for file upload consistency)
       location,
       audioDuration,
       latitude,
@@ -118,7 +109,7 @@ export const createAttendance = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Check if user is on field trip
+    // Rest of the function remains the same...
     const isOnFieldTrip = user.fieldTrips.length > 0;
     const finalLocationType = isOnFieldTrip
       ? LocationType.FIELDTRIP
@@ -128,7 +119,6 @@ export const createAttendance = async (req: Request, res: Response) => {
     const sessionType = getSessionType(currentTime);
     const todayDate = getTodayDate();
 
-    // Check if attendance already exists for today
     const existingAttendance = await prisma.attendance.findUnique({
       where: {
         employeeNumber_date: {
@@ -145,7 +135,6 @@ export const createAttendance = async (req: Request, res: Response) => {
       });
     }
 
-    // Process uploaded files
     const files = (req.files as Express.Multer.File[]) || [];
     const audioFile = files.find((f) => f.mimetype.startsWith("audio/"));
     const photoFile = files.find((f) => f.mimetype.startsWith("image/"));
@@ -164,20 +153,17 @@ export const createAttendance = async (req: Request, res: Response) => {
     const lat = latitude ? parseFloat(latitude) : null;
     const lng = longitude ? parseFloat(longitude) : null;
 
-    // Get location details from coordinates
     let locationDetails = { locationAddress: null, county: null, state: null, postcode: null };
     if (lat && lng) {
       locationDetails = await getLocationDetails(lat, lng);
     }
 
-    // Determine location description
     let takenLocation = location || null;
     if (isOnFieldTrip) {
       takenLocation = "Outside IIT (Field Trip)";
     }
 
     if (existingAttendance && !existingAttendance.checkoutTime) {
-      // Re-checkin → update existing record
       const updatedAttendance = await prisma.attendance.update({
         where: {
           employeeNumber_date: {
@@ -209,7 +195,6 @@ export const createAttendance = async (req: Request, res: Response) => {
       });
     }
 
-    // First check-in of the day → create new attendance
     const newAttendance = await prisma.attendance.create({
       data: {
         employeeNumber: user.employeeNumber,
@@ -227,7 +212,6 @@ export const createAttendance = async (req: Request, res: Response) => {
         county: locationDetails.county,
         state: locationDetails.state,
         postcode: locationDetails.postcode,
-        // attendanceType will be determined at checkout
       }
     });
 
@@ -244,27 +228,25 @@ export const createAttendance = async (req: Request, res: Response) => {
 
 export const checkoutAttendance = async (req: Request, res: Response) => {
   try {
-    const { username } = req.body;
+    const { employeeNumber } = req.body; // Changed to employeeNumber
 
-    // Get username from token if available
-    const tokenUsername = req.user?.username;
-    const finalUsername = username || tokenUsername;
+    const tokenEmployeeNumber = req.user?.employeeNumber;
+    const finalEmployeeNumber = employeeNumber || tokenEmployeeNumber;
 
-    if (!finalUsername) {
-      return res.status(400).json({ error: "Username is required" });
+    if (!finalEmployeeNumber) {
+      return res.status(400).json({ error: "Employee number is required" });
     }
 
-    const user = await prisma.user.findFirst({
-      where: { username: finalUsername },
+    const user = await prisma.user.findUnique({
+      where: { employeeNumber: finalEmployeeNumber },
     });
 
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({ error: "Employee not found" });
     }
 
     const todayDate = getTodayDate();
 
-    // Find today's attendance
     const attendance = await prisma.attendance.findUnique({
       where: {
         employeeNumber_date: {
@@ -291,10 +273,8 @@ export const checkoutAttendance = async (req: Request, res: Response) => {
     const checkInTime = attendance.checkinTime || new Date();
     const sessionType = attendance.sessionType || AttendanceSession.FN;
 
-    // Determine attendance type
     const attendanceType = determineAttendanceType(checkInTime, checkOutTime, sessionType);
 
-    // Update attendance with checkout
     const updatedAttendance = await prisma.attendance.update({
       where: {
         employeeNumber_date: {
@@ -322,18 +302,18 @@ export const checkoutAttendance = async (req: Request, res: Response) => {
 
 export const getTodayAttendance = async (req: Request, res: Response) => {
   try {
-    const { username } = req.params;
+    const { employeeNumber } = req.params; // Changed to employeeNumber
 
-    if (!username) {
-      return res.status(400).json({ error: "Username is required" });
+    if (!employeeNumber) {
+      return res.status(400).json({ error: "Employee number is required" });
     }
 
-    const user = await prisma.user.findFirst({
-      where: { username },
+    const user = await prisma.user.findUnique({
+      where: { employeeNumber },
     });
 
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({ error: "Employee not found" });
     }
 
     const todayDate = getTodayDate();
@@ -364,6 +344,7 @@ export const getTodayAttendance = async (req: Request, res: Response) => {
   }
 };
 
+// getUserAttendanceCalendar remains the same as it already uses employeeNumber
 export const getUserAttendanceCalendar = async (req: Request, res: Response) => {
   try {
     const { employeeNumber } = req.params;
@@ -405,7 +386,6 @@ export const getUserAttendanceCalendar = async (req: Request, res: Response) => 
       }
     });
 
-    // Calculate statistics
     const totalFullDays = attendances.filter(a => a.attendanceType === AttendanceType.FULL_DAY).length;
     const totalHalfDays = attendances.filter(a => a.attendanceType === AttendanceType.HALF_DAY).length;
     const notCheckedOut = attendances.filter(a => !a.checkoutTime).length;

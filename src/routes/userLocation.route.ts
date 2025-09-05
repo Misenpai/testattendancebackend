@@ -4,7 +4,8 @@ import {
   saveFieldTrips,
   getFieldTrips,
   getUserFieldTrips,
-  getUserFieldTripsByUsername,
+  getUserFieldTripsByUsername, // Keep for username operations
+  getUserFieldTripsByEmployeeNumber, // Add for employeeNumber operations
   checkAndDeactivateExpiredFieldTrips,
   processFieldTripAttendance,
   deleteFieldTrip,
@@ -19,7 +20,10 @@ const router = Router();
 router.put('/field-trips', authenticateToken, saveFieldTrips);
 router.get('/field-trips/:employeeNumber', authenticateToken, getFieldTrips);
 router.get('/user-field-trips/:employeeNumber', authenticateToken, getUserFieldTrips);
+
+// Keep both username and employeeNumber endpoints for flexibility
 router.get('/user-field-trips/username/:username', authenticateToken, getUserFieldTripsByUsername);
+router.get('/user-field-trips/employee/:employeeNumber', authenticateToken, getUserFieldTripsByEmployeeNumber);
 
 // Additional field trip management routes
 router.delete('/field-trip/:fieldTripKey', authenticateToken, deleteFieldTrip);

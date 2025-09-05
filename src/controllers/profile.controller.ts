@@ -3,19 +3,19 @@ import { PrismaClient } from '../../generated/prisma/index.js';
 
 const prisma = new PrismaClient();
 
-export const getUserProfileByUsername = async (req: Request, res: Response) => {
+export const getUserProfileByEmployeeNumber = async (req: Request, res: Response) => {
   try {
-    const { username } = req.params;
+    const { employeeNumber } = req.params; // Use employeeNumber for profile operations
 
-    if (!username) {
+    if (!employeeNumber) {
       return res.status(400).json({
         success: false,
-        error: "Username is required"
+        error: "Employee number is required"
       });
     }
 
     const user = await prisma.user.findUnique({
-      where: { username: username },
+      where: { employeeNumber: employeeNumber },
       select: {
         employeeNumber: true,
         username: true,
@@ -26,7 +26,7 @@ export const getUserProfileByUsername = async (req: Request, res: Response) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: "User not found"
+        error: "Employee not found"
       });
     }
     res.status(200).json({
@@ -35,7 +35,7 @@ export const getUserProfileByUsername = async (req: Request, res: Response) => {
     });
 
   } catch (error: any) {
-    console.error("Get user profile by username error:", error);
+    console.error("Get user profile by employee number error:", error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -106,7 +106,7 @@ export const updateUserProfile = async (req: Request, res: Response) => {
     if (error.code === 'P2025') {
       return res.status(404).json({
         success: false,
-        error: "User not found"
+        error: "Employee not found"
       });
     }
 

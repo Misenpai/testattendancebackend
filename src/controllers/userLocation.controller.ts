@@ -169,9 +169,10 @@ export const getUserFieldTrips = async (req: Request, res: Response) => {
   }
 };
 
+// Keep getUserFieldTripsByUsername for username-based operations
 export const getUserFieldTripsByUsername = async (req: Request, res: Response) => {
   try {
-    const { username } = req.params;
+    const { username } = req.params; // Keep username
 
     if (!username) {
       return res.status(400).json({
@@ -211,7 +212,6 @@ export const getUserFieldTripsByUsername = async (req: Request, res: Response) =
       return today >= start && today <= end && trip.isActive;
     });
 
-    // Determine location type - if on field trip, use FIELDTRIP, otherwise CAMPUS
     const locationType = isOnFieldTrip ? "FIELDTRIP" : "CAMPUS";
 
     res.status(200).json({
@@ -226,6 +226,69 @@ export const getUserFieldTripsByUsername = async (req: Request, res: Response) =
     });
   } catch (error: any) {
     console.error("Get user field trips by username error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
+// Add new function for employeeNumber-based operations
+export const getUserFieldTripsByEmployeeNumber = async (req: Request, res: Response) => {
+  try {
+    const { employeeNumber } = req.params;
+
+    if (!employeeNumber) {
+      return res.status(400).json({
+        success: false,
+        error: "Employee number is required",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { employeeNumber },
+      include: {
+        fieldTrips: {
+          where: {
+            isActive: true,
+          },
+          orderBy: { startDate: 'asc' }
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "Employee not found",
+      });
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const isOnFieldTrip = user.fieldTrips.some(trip => {
+      const start = new Date(trip.startDate);
+      const end = new Date(trip.endDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      return today >= start && today <= end && trip.isActive;
+    });
+
+    const locationType = isOnFieldTrip ? "FIELDTRIP" : "CAMPUS";
+
+    res.status(200).json({
+      success: true,
+      data: {
+        employeeNumber: user.employeeNumber,
+        username: user.username,
+        empClass: user.empClass,
+        locationType: locationType,
+        fieldTrips: user.fieldTrips || []
+      },
+    });
+  } catch (error: any) {
+    console.error("Get user field trips by employee number error:", error);
     res.status(500).json({
       success: false,
       error: error.message,
