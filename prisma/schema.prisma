@@ -55,6 +55,7 @@ model Attendance {
   sessionType         AttendanceSession?
   attendanceType      AttendanceType?     // FULL_DAY, HALF_DAY
   locationType        LocationType        @default(CAMPUS)
+  takenLocation   String?  @db.VarChar(255)
   
   // Photo data (stored directly - one photo per attendance)
   photoUrl            String?      @db.VarChar(500)
