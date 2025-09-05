@@ -81,7 +81,6 @@ export const createAttendance = async (req: Request, res: Response) => {
     const {
       username,
       location,
-      photoType,
       audioDuration,
       latitude,
       longitude,
@@ -428,113 +427,6 @@ export const getUserAttendanceCalendar = async (req: Request, res: Response) => 
     });
   } catch (error: any) {
     console.error("Get user attendance calendar error:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-export const getAllUsersWithAttendance = async (req: Request, res: Response) => {
-  try {
-    const { month, year } = req.query;
-
-    const queryMonth = month ? parseInt(month as string) : new Date().getMonth() + 1;
-    const queryYear = year ? parseInt(year as string) : new Date().getFullYear();
-
-    const startDate = new Date(queryYear, queryMonth - 1, 1);
-    const endDate = new Date(queryYear, queryMonth, 0);
-
-    const users = await prisma.user.findMany({
-      select: {
-        employeeNumber: true,
-        username: true,
-        empClass: true,
-        userProjects: {
-          include: {
-            project: true
-          }
-        },
-        attendances: {
-          where: {
-            date: {
-              gte: startDate,
-              lte: endDate
-            }
-          },
-          orderBy: {
-            date: 'desc'
-          }
-        },
-        fieldTrips: {
-          where: {
-            isActive: true
-          }
-        }
-      },
-      orderBy: {
-        username: 'asc'
-      }
-    });
-
-    // Format users with statistics
-    const formattedUsers = users.map(user => {
-      const fullDays = user.attendances.filter(a => a.attendanceType === AttendanceType.FULL_DAY).length;
-      const halfDays = user.attendances.filter(a => a.attendanceType === AttendanceType.HALF_DAY).length;
-      const notCheckedOut = user.attendances.filter(a => !a.checkoutTime).length;
-      const totalDays = fullDays + (halfDays * 0.5) + (notCheckedOut * 0.5);
-
-      return {
-        employeeNumber: user.employeeNumber,
-        username: user.username,
-        empClass: user.empClass,
-        projects: user.userProjects.map(up => ({
-          projectCode: up.projectCode,
-          department: up.project.department
-        })),
-        hasActiveFieldTrip: user.fieldTrips.length > 0,
-        monthlyStatistics: {
-          totalDays,
-          fullDays,
-          halfDays,
-          notCheckedOut
-        },
-        attendances: user.attendances.map(att => ({
-          date: att.date,
-          checkinTime: att.checkinTime,
-          checkoutTime: att.checkoutTime,
-          sessionType: att.sessionType,
-          attendanceType: att.attendanceType,
-          locationType: att.locationType,
-          isFullDay: att.attendanceType === AttendanceType.FULL_DAY,
-          isHalfDay: att.attendanceType === AttendanceType.HALF_DAY,
-          isCheckedOut: !!att.checkoutTime,
-          location: {
-            takenLocation: att.takenLocation,
-            latitude: att.latitude,
-            longitude: att.longitude,
-            locationAddress: att.locationAddress,
-            county: att.county,
-            state: att.state,
-            postcode: att.postcode
-          },
-          photo: att.photoUrl ? {
-            url: att.photoUrl
-          } : null,
-          audio: att.audioUrl ? {
-            url: att.audioUrl,
-            duration: att.audioDuration
-          } : null
-        }))
-      };
-    });
-
-    res.status(200).json({
-      success: true,
-      month: queryMonth,
-      year: queryYear,
-      totalUsers: formattedUsers.length,
-      data: formattedUsers
-    });
-  } catch (error: any) {
-    console.error("Get all users error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
