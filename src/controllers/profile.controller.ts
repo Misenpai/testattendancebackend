@@ -19,8 +19,7 @@ export const getUserProfileByUsername = async (req: Request, res: Response) => {
       select: {
         employeeNumber: true,
         username: true,
-        empClass: true,
-        dateOfResign: true
+        empClass: true
       }
     });
 
@@ -47,7 +46,7 @@ export const getUserProfileByUsername = async (req: Request, res: Response) => {
 export const updateUserProfile = async (req: Request, res: Response) => {
   try {
     const { employeeNumber } = req.params;
-    const { username, empClass, dateOfResign } = req.body;
+    const { username, empClass } = req.body;
 
     if (!employeeNumber) {
       return res.status(400).json({
@@ -59,7 +58,6 @@ export const updateUserProfile = async (req: Request, res: Response) => {
     const updateUserData: any = {};
     if (username) updateUserData.username = username.trim();
     if (empClass) updateUserData.empClass = empClass;
-    if (dateOfResign) updateUserData.dateOfResign = new Date(dateOfResign);
 
     if (Object.keys(updateUserData).length === 0) {
       return res.status(400).json({
@@ -92,8 +90,7 @@ export const updateUserProfile = async (req: Request, res: Response) => {
       select: {
         employeeNumber: true,
         username: true,
-        empClass: true,
-        dateOfResign: true
+        empClass: true
       }
     });
 

@@ -19,7 +19,6 @@ export const connectDB = async () => {
   }
 };
 
-
 export const seedProjectsData = async () => {
   try {
     const projects = [
@@ -56,7 +55,6 @@ export const seedProjectsData = async () => {
   }
 };
 
-
 export const syncUsersFromAPI = async () => {
   try {
     const apiUrl = process.env.USER_SYNC_API_URL!
@@ -92,24 +90,23 @@ export const syncUsersFromAPI = async () => {
           continue;
         }
 
-        
+        // Check if user exists
         const existingUser = await prisma.user.findUnique({
           where: { employeeNumber: userData.employeeId }
         });
 
         if (!existingUser) {
-          
+          // Create new user
           await prisma.user.create({
             data: {
               employeeNumber: userData.employeeId,
               username: userData.username,
-              empClass: 'PJ',
-              dateOfResign: null
+              empClass: 'PJ'
             }
           });
           syncResults.created++;
         } else {
-          
+          // Update username if changed
           if (existingUser.username !== userData.username) {
             await prisma.user.update({
               where: { employeeNumber: userData.employeeId },
@@ -119,7 +116,7 @@ export const syncUsersFromAPI = async () => {
           }
         }
 
-        
+        // Check if project exists
         const projectExists = await prisma.project.findUnique({
           where: { projectCode: userData.projectKey }
         });
@@ -129,7 +126,7 @@ export const syncUsersFromAPI = async () => {
           continue;
         }
 
-        
+        // Check if user-project relation exists
         const relationExists = await prisma.userProjectRelation.findUnique({
           where: {
             employeeNumber_projectCode: {
@@ -140,28 +137,14 @@ export const syncUsersFromAPI = async () => {
         });
 
         if (!relationExists) {
-          
+          // Create user-project relation
           await prisma.userProjectRelation.create({
             data: {
               employeeNumber: userData.employeeId,
-              username: userData.username,
               projectCode: userData.projectKey
             }
           });
           syncResults.userProjectsCreated++;
-        } else {
-          
-          if (relationExists.username !== userData.username) {
-            await prisma.userProjectRelation.update({
-              where: {
-                employeeNumber_projectCode: {
-                  employeeNumber: userData.employeeId,
-                  projectCode: userData.projectKey
-                }
-              },
-              data: { username: userData.username }
-            });
-          }
         }
 
       } catch (userError) {
@@ -187,13 +170,12 @@ export const syncUsersFromAPI = async () => {
   }
 };
 
-
 export const seedBasicCalendar = async () => {
   try {
     const currentYear = new Date().getFullYear();
     const weekendDates = [];
 
-    
+    // Generate all weekend dates for the current year
     for (let month = 0; month < 12; month++) {
       const daysInMonth = new Date(currentYear, month + 1, 0).getDate();
       
@@ -201,7 +183,7 @@ export const seedBasicCalendar = async () => {
         const date = new Date(Date.UTC(currentYear, month, day, 12));
         const dayOfWeek = date.getDay();
         
-        
+        // Check if weekend (Saturday = 6, Sunday = 0)
         if (dayOfWeek === 0 || dayOfWeek === 6) {
           weekendDates.push({
             date: date,
@@ -237,27 +219,14 @@ export const seedBasicCalendar = async () => {
 
 export const seedPIData = async () => {
   try {
-    const projectCodes = [
-      'J4E89B2F', 
-      'H9A53C7D', 
-      'G2D71E5A', 
-      'F6C28A4B', 
-      'A9F41C3E', 
-      'B7E82A9D', 
-      'C3D15F6B', 
-      'D8A94E2C', 
-      'E1B37D9F', 
-      'K7D12F6A', 
-    ];
-
-    
+    // Create PI users
     const piData = [
       { username: 'PIUser1', password: '123456', projectCode: 'J4E89B2F' },
       { username: 'PIUser2', password: '123456', projectCode: 'A9F41C3E' },
       { username: 'PIUser3', password: '123456', projectCode: 'D8A94E2C' }
     ];
 
-    
+    // Create PIs
     await prisma.pI.createMany({
       data: piData,
       skipDuplicates: true
@@ -265,14 +234,14 @@ export const seedPIData = async () => {
 
     console.log(`✅ Seeded ${piData.length} PIs successfully`);
     
-    
+    // Define PI project assignments
     const piProjectAssignments = [
       { username: 'PIUser1', projects: ['J4E89B2F', 'H9A53C7D', 'G2D71E5A', 'F6C28A4B'] },
       { username: 'PIUser2', projects: ['A9F41C3E', 'B7E82A9D', 'C3D15F6B'] },
       { username: 'PIUser3', projects: ['D8A94E2C', 'E1B37D9F', 'K7D12F6A'] }
     ];
 
-    
+    // Create PI-Project relations
     const piProjectRelations = [];
     for (const assignment of piProjectAssignments) {
       const pi = await prisma.pI.findUnique({
@@ -281,17 +250,17 @@ export const seedPIData = async () => {
       
       if (pi) {
         for (const projectCode of assignment.projects) {
-          if (projectCode) { 
+          if (projectCode) {
             piProjectRelations.push({
               principalInvestigatorKey: pi.principalInvestigatorKey,
-              projectCode: projectCode 
+              projectCode: projectCode
             });
           }
         }
       }
     }
 
-    
+    // Create all relations
     if (piProjectRelations.length > 0) {
       await prisma.pIProjectRelation.createMany({
         data: piProjectRelations,
@@ -301,7 +270,7 @@ export const seedPIData = async () => {
       console.log(`✅ Created ${piProjectRelations.length} PI-Project relations successfully`);
     }
 
-    
+    // Log distribution
     console.log('PI-Project Distribution:');
     piProjectAssignments.forEach(assignment => {
       console.log(`  - ${assignment.username}: ${assignment.projects.length} projects (${assignment.projects.join(', ')})`);
@@ -321,7 +290,6 @@ export const seedPIData = async () => {
     };
   }
 };
-
 
 export const addHoliday = async (date: Date, description: string) => {
   try {
@@ -361,24 +329,23 @@ export const addHoliday = async (date: Date, description: string) => {
   }
 };
 
-
 export const initializeDatabase = async () => {
   try {
     console.log('🚀 Initializing database...');
 
-    
+    // Connect to database
     const connection = await connectDB();
     if (!connection.success) {
       throw new Error(connection.message);
     }
 
-    
+    // Seed projects
     await seedProjectsData();
 
-    
+    // Seed calendar
     await seedBasicCalendar();
 
-    
+    // Sync users from API
     await syncUsersFromAPI();
 
     console.log('✅ Database initialization completed successfully');
@@ -396,7 +363,6 @@ export const initializeDatabase = async () => {
     };
   }
 };
-
 
 export const getDatabaseStats = async () => {
   try {
@@ -433,7 +399,6 @@ export const getDatabaseStats = async () => {
     };
   }
 };
-
 
 export const disconnectDB = async () => {
   try {

@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { PrismaClient } from '../../generated/prisma/index.js';
+import { PrismaClient, AttendanceType } from '../../generated/prisma/index.js';
 import { generateToken } from '../utils/jwt.js';
 import { getiitAuthService } from '../services/iitAuthService.js';
 
@@ -58,14 +58,6 @@ export const loginUser = async (req: Request, res: Response) => {
       });
     }
 
-    // Check if user has resigned
-    if (user.dateOfResign && user.dateOfResign <= new Date()) {
-      return res.status(401).json({ 
-        success: false, 
-        error: "Access denied. User has resigned." 
-      });
-    }
-
     // Generate JWT token
     const token = generateToken({
       employeeNumber: user.employeeNumber,
@@ -112,7 +104,6 @@ export const getUserById = async (req: Request, res: Response) => {
         employeeNumber: true,
         username: true,
         empClass: true,
-        dateOfResign: true,
         userProjects: {
           select: {
             projectCode: true,
@@ -126,14 +117,7 @@ export const getUserById = async (req: Request, res: Response) => {
         attendances: {
           take: 10,
           orderBy: {
-            attendanceCalendar: {
-              day: 'desc'
-            }
-          },
-          include: {
-            attendanceCalendar: true,
-            attendanceType: true,
-            locationAttendance: true
+            date: 'desc'
           }
         }
       }
@@ -146,9 +130,34 @@ export const getUserById = async (req: Request, res: Response) => {
       });
     }
 
+    // Format attendances
+    const formattedUser = {
+      ...user,
+      attendances: user.attendances.map(att => ({
+        date: att.date,
+        checkinTime: att.checkinTime,
+        checkoutTime: att.checkoutTime,
+        sessionType: att.sessionType,
+        attendanceType: att.attendanceType,
+        locationType: att.locationType,
+        isFullDay: att.attendanceType === AttendanceType.FULL_DAY,
+        isHalfDay: att.attendanceType === AttendanceType.HALF_DAY,
+        isCheckedOut: !!att.checkoutTime,
+        location: {
+          takenLocation: att.takenLocation,
+          latitude: att.latitude,
+          longitude: att.longitude,
+          locationAddress: att.locationAddress,
+          county: att.county,
+          state: att.state,
+          postcode: att.postcode
+        }
+      }))
+    };
+
     res.status(200).json({
       success: true,
-      data: user
+      data: formattedUser
     });
 
   } catch (error: any) {

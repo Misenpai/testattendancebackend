@@ -1,4 +1,4 @@
-// src/routes/fieldTrip.route.ts
+// src/routes/userLocation.route.ts
 import { Router } from 'express';
 import {
   saveFieldTrips,
@@ -6,7 +6,10 @@ import {
   getUserFieldTrips,
   getUserFieldTripsByUsername,
   checkAndDeactivateExpiredFieldTrips,
-  processFieldTripAttendance
+  processFieldTripAttendance,
+  deleteFieldTrip,
+  getAllActiveFieldTrips,
+  updateFieldTrip
 } from '../controllers/userLocation.controller.js';
 import { authenticateToken } from '../middleware/auth.js';
 
@@ -17,6 +20,11 @@ router.put('/field-trips', authenticateToken, saveFieldTrips);
 router.get('/field-trips/:employeeNumber', authenticateToken, getFieldTrips);
 router.get('/user-field-trips/:employeeNumber', authenticateToken, getUserFieldTrips);
 router.get('/user-field-trips/username/:username', authenticateToken, getUserFieldTripsByUsername);
+
+// Additional field trip management routes
+router.delete('/field-trip/:fieldTripKey', authenticateToken, deleteFieldTrip);
+router.patch('/field-trip/:fieldTripKey', authenticateToken, updateFieldTrip);
+router.get('/field-trips', authenticateToken, getAllActiveFieldTrips);
 
 // Admin/system routes for field trip management
 router.post('/field-trips/check-expired', authenticateToken, checkAndDeactivateExpiredFieldTrips);

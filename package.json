@@ -9,7 +9,10 @@
     "start": "node dist/index.js",
     "seed": "tsx src/scripts/seed.ts",
     "seed:projects": "tsx -e \"import('./src/config/db.js').then(db => db.seedProjectsData().then(() => process.exit(0)))\"",
-    "seed:holidays": "tsx src/scripts/seed-holidays.ts"
+    "seed:holidays": "tsx src/scripts/seed-holidays.ts",
+    "seed:calendar": "tsx src/scripts/seed-calendar.ts",
+    "seed:pis": "tsx src/scripts/seed-pis.ts",
+    "seed:users": "tsx src/scripts/seed-users.ts"
   },
   "type": "module",
   "keywords": [],

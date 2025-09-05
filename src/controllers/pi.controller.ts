@@ -1,6 +1,5 @@
-// src/controllers/pi.controller.ts
 import type { Request, Response } from 'express';
-import { PrismaClient } from '../../generated/prisma/index.js';
+import { PrismaClient, AttendanceType } from '../../generated/prisma/index.js';
 import { generateToken } from '../utils/jwt.js';
 
 const prisma = new PrismaClient();
@@ -121,24 +120,13 @@ export const getPIUsersAttendance = async (req: Request, res: Response) => {
         },
         attendances: {
           where: {
-            attendanceCalendar: {
-              day: {
-                gte: startDate,
-                lte: endDate
-              }
+            date: {
+              gte: startDate,
+              lte: endDate
             }
-          },
-          include: {
-            attendanceCalendar: true,
-            attendanceType: true,
-            locationAttendance: true, // Include location attendance
-            photos: true,
-            audio: true
           },
           orderBy: {
-            attendanceCalendar: {
-              day: 'desc'
-            }
+            date: 'desc'
           }
         },
         fieldTrips: {
@@ -154,9 +142,9 @@ export const getPIUsersAttendance = async (req: Request, res: Response) => {
 
     // Format response with location details
     const formattedUsers = users.map(user => {
-      const fullDays = user.attendances.filter(a => a.attendanceType?.fullDay).length;
-      const halfDays = user.attendances.filter(a => a.attendanceType?.halfDay).length;
-      const notCheckedOut = user.attendances.filter(a => !a.attendanceType?.isCheckout).length;
+      const fullDays = user.attendances.filter(a => a.attendanceType === AttendanceType.FULL_DAY).length;
+      const halfDays = user.attendances.filter(a => a.attendanceType === AttendanceType.HALF_DAY).length;
+      const notCheckedOut = user.attendances.filter(a => !a.checkoutTime).length;
       const totalDays = fullDays + (halfDays * 0.5) + (notCheckedOut * 0.5);
 
       return {
@@ -175,33 +163,34 @@ export const getPIUsersAttendance = async (req: Request, res: Response) => {
           notCheckedOut
         },
         attendances: user.attendances.map(att => ({
-          date: att.attendanceCalendar?.day,
-          checkinTime: att.attendanceType?.checkinTime,
-          checkoutTime: att.attendanceType?.checkoutTime,
-          sessionType: att.attendanceType?.attendanceGivenTime,
-          isFullDay: att.attendanceType?.fullDay,
-          isHalfDay: att.attendanceType?.halfDay,
-          isCheckedOut: att.attendanceType?.isCheckout,
-          takenLocation: att.attendanceType?.takenLocation,
+          date: att.date,
+          checkinTime: att.checkinTime,
+          checkoutTime: att.checkoutTime,
+          sessionType: att.sessionType,
+          attendanceType: att.attendanceType,
+          isFullDay: att.attendanceType === AttendanceType.FULL_DAY,
+          isHalfDay: att.attendanceType === AttendanceType.HALF_DAY,
+          isCheckedOut: !!att.checkoutTime,
+          takenLocation: att.takenLocation,
           location: {
-            takenLocation: att.attendanceType?.takenLocation,
-            latitude: att.locationAttendance?.latitude,
-            longitude: att.locationAttendance?.longitude,
-            county: att.locationAttendance?.county, // Include county
-            state: att.locationAttendance?.state,
-            postcode: att.locationAttendance?.postcode, // Include pincode
-            address: att.locationAttendance ? 
-              `${att.locationAttendance.county || ''}, ${att.locationAttendance.state || ''}, ${att.locationAttendance.postcode || ''}`.replace(/^, |, , |, $/g, '').trim() 
-              : null
+            takenLocation: att.takenLocation,
+            latitude: att.latitude,
+            longitude: att.longitude,
+            county: att.county,
+            state: att.state,
+            postcode: att.postcode,
+            address: att.locationAddress || 
+              (att.county || att.state || att.postcode ? 
+                `${att.county || ''}, ${att.state || ''}, ${att.postcode || ''}`.replace(/^, |, , |, $/g, '').trim() 
+                : null)
           },
-          photos: att.photos.map(p => ({
-            url: p.photoUrl,
-            type: p.photoType
-          })),
-          audio: att.audio.map(a => ({
-            url: a.audioUrl,
-            duration: a.duration
-          }))
+          photo: att.photoUrl ? {
+            url: att.photoUrl
+          } : null,
+          audio: att.audioUrl ? {
+            url: att.audioUrl,
+            duration: att.audioDuration
+          } : null
         }))
       };
     });
