@@ -217,9 +217,10 @@ export const seedBasicCalendar = async () => {
   }
 };
 
+// UPDATED: seedPIData function
 export const seedPIData = async () => {
   try {
-    // Create PI users
+    // Create PI users - username is now the primary key
     const piData = [
       { username: 'PIUser1', password: '123456', projectCode: 'J4E89B2F' },
       { username: 'PIUser2', password: '123456', projectCode: 'A9F41C3E' },
@@ -241,21 +242,15 @@ export const seedPIData = async () => {
       { username: 'PIUser3', projects: ['D8A94E2C', 'E1B37D9F', 'K7D12F6A'] }
     ];
 
-    // Create PI-Project relations
+    // Create PI-Project relations using username directly
     const piProjectRelations = [];
     for (const assignment of piProjectAssignments) {
-      const pi = await prisma.pI.findUnique({
-        where: { username: assignment.username }
-      });
-      
-      if (pi) {
-        for (const projectCode of assignment.projects) {
-          if (projectCode) {
-            piProjectRelations.push({
-              principalInvestigatorKey: pi.principalInvestigatorKey,
-              projectCode: projectCode
-            });
-          }
+      for (const projectCode of assignment.projects) {
+        if (projectCode) {
+          piProjectRelations.push({
+            username: assignment.username,
+            projectCode: projectCode
+          });
         }
       }
     }

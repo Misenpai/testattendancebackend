@@ -84,24 +84,22 @@ CREATE TABLE `user_project_relations` (
 
 -- CreateTable
 CREATE TABLE `pis` (
-    `principalInvestigatorKey` VARCHAR(191) NOT NULL,
     `username` VARCHAR(255) NOT NULL,
     `password` VARCHAR(255) NOT NULL,
     `projectCode` VARCHAR(255) NOT NULL,
 
-    UNIQUE INDEX `pis_username_key`(`username`),
-    INDEX `pis_username_idx`(`username`),
-    PRIMARY KEY (`principalInvestigatorKey`)
+    INDEX `pis_projectCode_idx`(`projectCode`),
+    PRIMARY KEY (`username`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `pi_project_relations` (
-    `principalInvestigatorKey` VARCHAR(255) NOT NULL,
+    `username` VARCHAR(255) NOT NULL,
     `projectCode` VARCHAR(255) NOT NULL,
 
-    INDEX `pi_project_relations_principalInvestigatorKey_idx`(`principalInvestigatorKey`),
+    INDEX `pi_project_relations_username_idx`(`username`),
     INDEX `pi_project_relations_projectCode_idx`(`projectCode`),
-    PRIMARY KEY (`principalInvestigatorKey`, `projectCode`)
+    PRIMARY KEY (`username`, `projectCode`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- AddForeignKey
@@ -120,7 +118,7 @@ ALTER TABLE `user_project_relations` ADD CONSTRAINT `user_project_relations_proj
 ALTER TABLE `pis` ADD CONSTRAINT `pis_projectCode_fkey` FOREIGN KEY (`projectCode`) REFERENCES `projects`(`projectCode`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `pi_project_relations` ADD CONSTRAINT `pi_project_relations_principalInvestigatorKey_fkey` FOREIGN KEY (`principalInvestigatorKey`) REFERENCES `pis`(`principalInvestigatorKey`) ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE `pi_project_relations` ADD CONSTRAINT `pi_project_relations_username_fkey` FOREIGN KEY (`username`) REFERENCES `pis`(`username`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `pi_project_relations` ADD CONSTRAINT `pi_project_relations_projectCode_fkey` FOREIGN KEY (`projectCode`) REFERENCES `projects`(`projectCode`) ON DELETE CASCADE ON UPDATE CASCADE;

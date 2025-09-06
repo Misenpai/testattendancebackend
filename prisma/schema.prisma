@@ -138,12 +138,11 @@ model UserProjectRelation {
 }
 
 // ============================================
-// PI TABLES (Principal Investigators)
+// PI TABLES (Principal Investigators) - MODIFIED
 // ============================================
 
 model PI {
-  principalInvestigatorKey String  @id @default(cuid())
-  username                 String  @unique @db.VarChar(255)
+  username                 String  @id @db.VarChar(255)  // Changed: username is now primary key
   password                 String  @db.VarChar(255)
   projectCode              String  @db.VarChar(255)
 
@@ -152,20 +151,20 @@ model PI {
   piProjects               PIProjectRelation[]
 
   @@map("pis")
-  @@index([username])
+  @@index([projectCode])  // Added index on projectCode for better performance
 }
 
 model PIProjectRelation {
-  principalInvestigatorKey String @db.VarChar(255)
+  username               String @db.VarChar(255)  // Changed: now references PI username
   projectCode              String @db.VarChar(255)
 
   // Relations
-  pi                       PI      @relation(fields: [principalInvestigatorKey], references: [principalInvestigatorKey], onDelete: Cascade)
+  pi                       PI      @relation(fields: [username], references: [username], onDelete: Cascade)
   project                  Project @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
 
-  @@id([principalInvestigatorKey, projectCode])
+  @@id([username, projectCode])  // Changed: composite key uses piUsername
   @@map("pi_project_relations")
-  @@index([principalInvestigatorKey])
+  @@index([username])
   @@index([projectCode])
 }
 

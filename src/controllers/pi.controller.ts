@@ -15,7 +15,7 @@ export const loginPI = async (req: Request, res: Response) => {
       });
     }
 
-    // Find PI user
+    // Find PI user - username is now the primary key
     const pi = await prisma.pI.findUnique({
       where: { username },
       include: {
@@ -34,9 +34,9 @@ export const loginPI = async (req: Request, res: Response) => {
       });
     }
 
-    // Generate JWT token
+    // Generate JWT token using username as employeeNumber for consistency
     const token = generateToken({
-      employeeNumber: pi.principalInvestigatorKey,
+      employeeNumber: pi.username, // Use username as employeeNumber for PI
       username: pi.username,
       empClass: 'PI'
     });
@@ -64,18 +64,18 @@ export const loginPI = async (req: Request, res: Response) => {
 export const getPIUsersAttendance = async (req: Request, res: Response) => {
   try {
     const { month, year } = req.query;
-    const piUsername = req.user?.username;
+    const username = req.user?.username;
 
-    if (!piUsername) {
+    if (!username) {
       return res.status(401).json({
         success: false,
         error: 'Unauthorized'
       });
     }
 
-    // Get PI's projects
+    // Get PI's projects using username as primary key
     const pi = await prisma.pI.findUnique({
-      where: { username: piUsername },
+      where: { username: username },
       include: {
         piProjects: true
       }
