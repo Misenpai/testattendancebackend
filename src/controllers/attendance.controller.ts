@@ -8,10 +8,11 @@ const prisma = new PrismaClient();
 // Helper functions remain the same...
 async function getLocationDetails(lat: number, lng: number) {
   try {
+    console.log("This is running")
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`;
     const response = await axios.get(url, {
       headers: {
-        'User-Agent': 'AttendanceApp/1.0'
+        'User-Agent': 'MyAPP/1.0'
       }
     });
     
