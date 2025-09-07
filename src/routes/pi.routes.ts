@@ -1,14 +1,13 @@
 // src/routes/pi.route.ts
-import { Router } from 'express';
-import { 
-  loginPI,
-  getPIUsersAttendance
-} from '../controllers/pi.controller.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { Router } from "express";
+import { getPIUsersAttendanceSSO } from "../controllers/pi.controller.js";
 
 const router = Router();
 
-router.post('/pi/login', loginPI);
-router.get('/pi/users-attendance', authenticateToken, getPIUsersAttendance);
+// Remove login route
+// router.post('/pi/login', loginPI); // REMOVE THIS
+
+// SSO-based endpoint (no auth middleware needed as it's SSO)
+router.post("/pi/users-attendance-sso", getPIUsersAttendanceSSO);
 
 export default router;

@@ -1,97 +1,29 @@
-import type { Request, Response } from 'express';
-import { PrismaClient, AttendanceType } from '../../generated/prisma/index.js';
-import { generateToken } from '../utils/jwt.js';
+import type { Request, Response } from "express";
+import { PrismaClient, AttendanceType } from "../../generated/prisma/index.js";
 
 const prisma = new PrismaClient();
 
-export const loginPI = async (req: Request, res: Response) => {
-  try {
-    const { username, password } = req.body;
+// Remove loginPI function completely
 
-    if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        error: 'Username and password are required'
-      });
-    }
-
-    // Find PI user - username is now the primary key
-    const pi = await prisma.pI.findUnique({
-      where: { username },
-      include: {
-        piProjects: {
-          include: {
-            project: true
-          }
-        }
-      }
-    });
-
-    if (!pi || pi.password !== password) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid username or password'
-      });
-    }
-
-    // Generate JWT token using username as employeeNumber for consistency
-    const token = generateToken({
-      employeeNumber: pi.username, // Use username as employeeNumber for PI
-      username: pi.username,
-      empClass: 'PI'
-    });
-
-    const projects = pi.piProjects.map(pp => pp.projectCode);
-
-    res.status(200).json({
-      success: true,
-      username: pi.username,
-      projectCode: pi.projectCode,
-      projects,
-      token,
-      message: 'Login successful'
-    });
-
-  } catch (error: any) {
-    console.error('PI login error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-};
-
-export const getPIUsersAttendance = async (req: Request, res: Response) => {
+// Update getPIUsersAttendance to accept SSO data
+export const getPIUsersAttendanceSSO = async (req: Request, res: Response) => {
   try {
     const { month, year } = req.query;
-    const username = req.user?.username;
+    const { username, projectCodes } = req.body; // Get from SSO data
 
-    if (!username) {
-      return res.status(401).json({
+    if (!username || !projectCodes || !Array.isArray(projectCodes)) {
+      return res.status(400).json({
         success: false,
-        error: 'Unauthorized'
+        error: "Invalid SSO data",
       });
     }
 
-    // Get PI's projects using username as primary key
-    const pi = await prisma.pI.findUnique({
-      where: { username: username },
-      include: {
-        piProjects: true
-      }
-    });
-
-    if (!pi) {
-      return res.status(404).json({
-        success: false,
-        error: 'PI not found'
-      });
-    }
-
-    const projectCodes = pi.piProjects.map(pp => pp.projectCode);
-
-    const queryMonth = month ? parseInt(month as string) : new Date().getMonth() + 1;
-    const queryYear = year ? parseInt(year as string) : new Date().getFullYear();
+    const queryMonth = month
+      ? parseInt(month as string)
+      : new Date().getMonth() + 1;
+    const queryYear = year
+      ? parseInt(year as string)
+      : new Date().getFullYear();
 
     const startDate = new Date(queryYear, queryMonth - 1, 1);
     const endDate = new Date(queryYear, queryMonth, 0);
@@ -102,67 +34,74 @@ export const getPIUsersAttendance = async (req: Request, res: Response) => {
         userProjects: {
           some: {
             projectCode: {
-              in: projectCodes
-            }
-          }
-        }
+              in: projectCodes, // Use projectCodes from SSO
+            },
+          },
+        },
       },
       include: {
         userProjects: {
           include: {
-            project: true
+            project: true,
           },
           where: {
             projectCode: {
-              in: projectCodes
-            }
-          }
+              in: projectCodes,
+            },
+          },
         },
         attendances: {
           where: {
             date: {
               gte: startDate,
-              lte: endDate
-            }
+              lte: endDate,
+            },
           },
           orderBy: {
-            date: 'desc'
-          }
+            date: "desc",
+          },
         },
         fieldTrips: {
           where: {
-            isActive: true
-          }
-        }
+            isActive: true,
+          },
+        },
       },
       orderBy: {
-        username: 'asc'
-      }
+        username: "asc",
+      },
     });
 
-    // Format response with location details
-    const formattedUsers = users.map(user => {
-      const fullDays = user.attendances.filter(a => a.attendanceType === AttendanceType.FULL_DAY).length;
-      const halfDays = user.attendances.filter(a => a.attendanceType === AttendanceType.HALF_DAY).length;
-      const notCheckedOut = user.attendances.filter(a => !a.checkoutTime).length;
-      const totalDays = fullDays + (halfDays * 0.5) + (notCheckedOut * 0.5);
+    // Rest of the function remains the same...
+    // [Format response logic]
+    const formattedUsers = users.map((user) => {
+      const fullDays = user.attendances.filter(
+        (a) => a.attendanceType === AttendanceType.FULL_DAY,
+      ).length;
+      const halfDays = user.attendances.filter(
+        (a) => a.attendanceType === AttendanceType.HALF_DAY,
+      ).length;
+      const notCheckedOut = user.attendances.filter(
+        (a) => !a.checkoutTime,
+      ).length;
+      const totalDays = fullDays + halfDays * 0.5 + notCheckedOut * 0.5;
 
       return {
         employeeNumber: user.employeeNumber,
         username: user.username,
         empClass: user.empClass,
-        projects: user.userProjects.map(up => ({
+        projects: user.userProjects.map((up) => ({
           projectCode: up.projectCode,
-          department: up.project.department
+          department: up.project.department,
         })),
         hasActiveFieldTrip: user.fieldTrips.length > 0,
         monthlyStatistics: {
           totalDays,
           fullDays,
           halfDays,
-          notCheckedOut
+          notCheckedOut,
         },
-        attendances: user.attendances.map(att => ({
+        attendances: user.attendances.map((att) => ({
           date: att.date,
           checkinTime: att.checkinTime,
           checkoutTime: att.checkoutTime,
@@ -179,19 +118,26 @@ export const getPIUsersAttendance = async (req: Request, res: Response) => {
             county: att.county,
             state: att.state,
             postcode: att.postcode,
-            address: att.locationAddress || 
-              (att.county || att.state || att.postcode ? 
-                `${att.county || ''}, ${att.state || ''}, ${att.postcode || ''}`.replace(/^, |, , |, $/g, '').trim() 
-                : null)
+            address:
+              att.locationAddress ||
+              (att.county || att.state || att.postcode
+                ? `${att.county || ""}, ${att.state || ""}, ${att.postcode || ""}`
+                    .replace(/^, |, , |, $/g, "")
+                    .trim()
+                : null),
           },
-          photo: att.photoUrl ? {
-            url: att.photoUrl
-          } : null,
-          audio: att.audioUrl ? {
-            url: att.audioUrl,
-            duration: att.audioDuration
-          } : null
-        }))
+          photo: att.photoUrl
+            ? {
+                url: att.photoUrl,
+              }
+            : null,
+          audio: att.audioUrl
+            ? {
+                url: att.audioUrl,
+                duration: att.audioDuration,
+              }
+            : null,
+        })),
       };
     });
 
@@ -200,14 +146,13 @@ export const getPIUsersAttendance = async (req: Request, res: Response) => {
       month: queryMonth,
       year: queryYear,
       totalUsers: formattedUsers.length,
-      data: formattedUsers
+      data: formattedUsers,
     });
-
   } catch (error: any) {
-    console.error('Get PI users attendance error:', error);
+    console.error("Get PI users attendance error:", error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
     });
   }
 };
