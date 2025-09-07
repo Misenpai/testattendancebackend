@@ -3,9 +3,6 @@ import { PrismaClient, AttendanceType } from "../../generated/prisma/index.js";
 
 const prisma = new PrismaClient();
 
-// Remove loginPI function completely
-
-// Update getPIUsersAttendance to accept SSO data
 export const getPIUsersAttendanceSSO = async (req: Request, res: Response) => {
   try {
     const { month, year } = req.query;
@@ -71,9 +68,6 @@ export const getPIUsersAttendanceSSO = async (req: Request, res: Response) => {
         username: "asc",
       },
     });
-
-    // Rest of the function remains the same...
-    // [Format response logic]
     const formattedUsers = users.map((user) => {
       const fullDays = user.attendances.filter(
         (a) => a.attendanceType === AttendanceType.FULL_DAY,
