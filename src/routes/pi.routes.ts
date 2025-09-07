@@ -1,13 +1,14 @@
-// src/routes/pi.route.ts
+// src/routes/pi.routes.ts
 import { Router } from "express";
-import { getPIUsersAttendanceSSO } from "../controllers/pi.controller.js";
+import { getPIUsersAttendanceSSO, getPIUsersAttendance } from "../controllers/pi.controller.js";
+import { flexibleAuth } from "../middleware/auth.js";
 
 const router = Router();
 
-// Remove login route
-// router.post('/pi/login', loginPI); // REMOVE THIS
-
-// SSO-based endpoint (no auth middleware needed as it's SSO)
+// SSO-based endpoint (POST - original)
 router.post("/pi/users-attendance-sso", getPIUsersAttendanceSSO);
+
+// New GET endpoint that supports both SSO and token auth
+router.get("/pi/users-attendance", flexibleAuth, getPIUsersAttendance);
 
 export default router;
