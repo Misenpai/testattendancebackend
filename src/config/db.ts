@@ -868,35 +868,42 @@ export const syncUsersFromAPI = async () => {
           continue;
         }
 
-        // Check if user exists
+        // Check if user exists (using employeeNumber as the field name)
         const existingUser = await prisma.user.findUnique({
-          where: { employeeNumber: userData.employeeId },
+          where: { employeeNumber: userData.employeeId }, // Map employeeId to employeeNumber
         });
 
         if (!existingUser) {
           // Create new user
           await prisma.user.create({
             data: {
-              employeeNumber: userData.employeeId,
+              employeeNumber: userData.employeeId, // Map employeeId to employeeNumber
               username: userData.username,
-              empClass: "PJ",
+              empClass: userData.empClass || "PJ", // Use empClass from API or default to "PJ"
             },
           });
           syncResults.created++;
         } else {
-          // Update username if changed
-          if (existingUser.username !== userData.username) {
+          // Update user if any data has changed
+          const needsUpdate = 
+            existingUser.username !== userData.username ||
+            existingUser.empClass !== (userData.empClass || "PJ");
+
+          if (needsUpdate) {
             await prisma.user.update({
               where: { employeeNumber: userData.employeeId },
-              data: { username: userData.username },
+              data: {
+                username: userData.username,
+                empClass: userData.empClass || "PJ",
+              },
             });
             syncResults.updated++;
           }
         }
 
-        // Check if project exists
+        // Check if project exists (using projectCode as the field name)
         const projectExists = await prisma.project.findUnique({
-          where: { projectCode: userData.projectKey },
+          where: { projectCode: userData.projectKey }, // Map projectKey to projectCode
         });
 
         if (!projectExists) {
@@ -910,8 +917,8 @@ export const syncUsersFromAPI = async () => {
         const relationExists = await prisma.userProjectRelation.findUnique({
           where: {
             employeeNumber_projectCode: {
-              employeeNumber: userData.employeeId,
-              projectCode: userData.projectKey,
+              employeeNumber: userData.employeeId, // Map employeeId to employeeNumber
+              projectCode: userData.projectKey, // Map projectKey to projectCode
             },
           },
         });
@@ -920,8 +927,8 @@ export const syncUsersFromAPI = async () => {
           // Create user-project relation
           await prisma.userProjectRelation.create({
             data: {
-              employeeNumber: userData.employeeId,
-              projectCode: userData.projectKey,
+              employeeNumber: userData.employeeId, // Map employeeId to employeeNumber
+              projectCode: userData.projectKey, // Map projectKey to projectCode
             },
           });
           syncResults.userProjectsCreated++;
