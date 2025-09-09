@@ -1,0 +1,188 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../generated/prisma"
+  binaryTargets = ["native", "linux-musl", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// CORE TABLES
+// ============================================
+
+model User {
+  employeeNumber String @id @db.VarChar(255)
+  username       String @unique @db.VarChar(255)
+  empClass       String @default("PJ") @db.VarChar(10)
+
+  // Relations
+  userProjects UserProjectRelation[]
+  attendances  Attendance[]
+  fieldTrips   FieldTrip[]
+
+  @@index([username])
+  @@map("users")
+}
+
+model Project {
+  projectCode String @id @db.VarChar(255)
+  department  String @db.VarChar(255)
+
+  // Relations
+  userProjects UserProjectRelation[]
+  // piProjects    PIProjectRelation[]
+  // pis           PI[]
+
+  @@index([department])
+  @@map("projects")
+}
+
+// ============================================
+// SINGLE ATTENDANCE TABLE - All data in one place
+// ============================================
+
+model Attendance {
+  // Composite primary key: employeeNumber + date
+  employeeNumber String   @db.VarChar(255)
+  date           DateTime @db.Date
+
+  // Core attendance data
+  checkinTime    DateTime?
+  checkoutTime   DateTime?
+  sessionType    AttendanceSession?
+  attendanceType AttendanceType? // FULL_DAY, HALF_DAY
+  locationType   LocationType       @default(CAMPUS)
+  takenLocation  String?            @db.VarChar(255)
+
+  // Photo data (stored directly - one photo per attendance)
+  photoUrl String? @db.VarChar(500)
+
+  // Audio data (stored directly - one audio per attendance)
+  audioUrl      String? @db.VarChar(500)
+  audioDuration Int? // in seconds
+
+  // Location data (denormalized for performance)
+  latitude        Float?  @db.Float
+  longitude       Float?  @db.Float
+  locationAddress String? @db.VarChar(500) // Full address as string
+  county          String? @db.VarChar(255)
+  state           String? @db.VarChar(255)
+  postcode        String? @db.VarChar(20)
+
+  // Relations
+  user User @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
+
+  @@id([employeeNumber, date]) // Composite primary key
+  @@index([date])
+  @@index([employeeNumber])
+  @@index([employeeNumber, date])
+  @@map("attendances")
+}
+
+// ============================================
+// CALENDAR & HOLIDAYS
+// ============================================
+
+model Calendar {
+  date        DateTime @id @db.Date
+  isHoliday   Boolean  @default(false)
+  isWeekend   Boolean  @default(false)
+  description String?  @db.VarChar(255)
+
+  @@index([date])
+  @@index([isHoliday])
+  @@map("calendar")
+}
+
+// ============================================
+// FIELD TRIPS (Simplified)
+// ============================================
+
+model FieldTrip {
+  fieldTripKey   String   @id @default(cuid())
+  employeeNumber String   @db.VarChar(255)
+  startDate      DateTime @db.Date
+  endDate        DateTime @db.Date
+  description    String?  @db.Text
+  isActive       Boolean  @default(true)
+  createdBy      String   @db.VarChar(255)
+
+  // Relations
+  user User @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
+
+  @@index([employeeNumber])
+  @@index([startDate, endDate])
+  @@index([employeeNumber, startDate, endDate])
+  @@map("field_trips")
+}
+
+// ============================================
+// USER-PROJECT RELATIONS
+// ============================================
+
+model UserProjectRelation {
+  employeeNumber String @db.VarChar(255)
+  projectCode    String @db.VarChar(255)
+
+  // Relations
+  user    User    @relation(fields: [employeeNumber], references: [employeeNumber], onDelete: Cascade)
+  project Project @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+
+  @@id([employeeNumber, projectCode])
+  @@index([employeeNumber])
+  @@index([projectCode])
+  @@map("user_project_relations")
+}
+
+// ============================================
+// PI TABLES (Principal Investigators) - MODIFIED
+// ============================================
+
+// model PI {
+//   username                 String  @id @db.VarChar(255)  // Changed: username is now primary key
+//   password                 String  @db.VarChar(255)
+//   projectCode              String  @db.VarChar(255)
+
+//   // Relations
+//   project                  Project             @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+//   piProjects               PIProjectRelation[]
+
+//   @@map("pis")
+//   @@index([projectCode])  // Added index on projectCode for better performance
+// }
+
+// model PIProjectRelation {
+//   username               String @db.VarChar(255)  // Changed: now references PI username
+//   projectCode              String @db.VarChar(255)
+
+//   // Relations
+//   pi                       PI      @relation(fields: [username], references: [username], onDelete: Cascade)
+//   project                  Project @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+
+//   @@id([username, projectCode])  // Changed: composite key uses piUsername
+//   @@map("pi_project_relations")
+//   @@index([username])
+//   @@index([projectCode])
+// }
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum LocationType {
+  CAMPUS
+  FIELDTRIP
+}
+
+enum AttendanceSession {
+  FN // Forenoon
+  AF // Afternoon
+}
+
+enum AttendanceType {
+  FULL_DAY
+  HALF_DAY
+}
