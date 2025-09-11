@@ -77,7 +77,7 @@ export const loginUserIIT = async (req: Request, res: Response) => {
         employeeNumber: user.employeeNumber,
         username: user.username,
         empClass: user.empClass,
-        dateOfResign: user.dateOfResign
+
       },
       token,
       message: "Login successful (IIT Verified)"
