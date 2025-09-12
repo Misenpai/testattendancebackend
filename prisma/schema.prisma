@@ -28,13 +28,10 @@ model User {
 }
 
 model Project {
-  projectCode String @id @db.VarChar(255)
-  department  String @db.VarChar(255)
-
-  // Relations
+  projectCode  String                @id @db.VarChar(255)
+  department   String                @db.VarChar(255)
   userProjects UserProjectRelation[]
-  // piProjects    PIProjectRelation[]
-  // pis           PI[]
+  piRelations  PIProjectRelation[]
 
   @@index([department])
   @@map("projects")
@@ -137,40 +134,24 @@ model UserProjectRelation {
   @@map("user_project_relations")
 }
 
-// ============================================
-// PI TABLES (Principal Investigators) - MODIFIED
-// ============================================
+model PI {
+  username String @id @db.VarChar(255)
 
-// model PI {
-//   username                 String  @id @db.VarChar(255)  // Changed: username is now primary key
-//   password                 String  @db.VarChar(255)
-//   projectCode              String  @db.VarChar(255)
+  piProjects PIProjectRelation[]
 
-//   // Relations
-//   project                  Project             @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
-//   piProjects               PIProjectRelation[]
+  @@map("pis")
+}
 
-//   @@map("pis")
-//   @@index([projectCode])  // Added index on projectCode for better performance
-// }
+model PIProjectRelation {
+  username    String @db.VarChar(255)
+  projectCode String @db.VarChar(255)
 
-// model PIProjectRelation {
-//   username               String @db.VarChar(255)  // Changed: now references PI username
-//   projectCode              String @db.VarChar(255)
+  pi      PI      @relation(fields: [username], references: [username], onDelete: Cascade)
+  project Project @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
 
-//   // Relations
-//   pi                       PI      @relation(fields: [username], references: [username], onDelete: Cascade)
-//   project                  Project @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
-
-//   @@id([username, projectCode])  // Changed: composite key uses piUsername
-//   @@map("pi_project_relations")
-//   @@index([username])
-//   @@index([projectCode])
-// }
-
-// ============================================
-// ENUMS
-// ============================================
+  @@id([username, projectCode])
+  @@map("pi_project_relations")
+}
 
 enum LocationType {
   CAMPUS
